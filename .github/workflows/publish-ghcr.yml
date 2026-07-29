@@ -1,18 +1,28 @@
-name: Publish Picket image
+name: Build and publish Picket
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       - "v*"
-  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - master
 
-permissions:
-  contents: read
-  packages: write
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: bgwastu/picket
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -34,30 +44,57 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Generate image metadata
+      - name: Extract image metadata
         id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=sha,prefix=,format=short
+            type=ref,event=branch
 
       - name: Build and publish image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
-          file: internal/dockerfile_hub
+          file: ./internal/dockerfile_hub
           platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deployment
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ] || [ -z "$WEBHOOK_TOKEN" ]; then
+            echo "WEBHOOK_URL / WEBHOOK_TOKEN secrets are not set; skipping deploy."
+            exit 0
+          fi
+          response="$(mktemp)"
+          code="$(curl --silent --show-error --output "$response" --write-out '%{http_code}' \
+            --request GET "$WEBHOOK_URL" \
+            --header "Authorization: Bearer $WEBHOOK_TOKEN")"
+          echo "HTTP $code"
+          cat "$response"
+          echo
+          test "$code" -ge 200 -a "$code" -lt 300
