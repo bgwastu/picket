@@ -20,6 +20,10 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: internal/site
+
       - name: Build frontend
         run: bun run build
         working-directory: internal/site
