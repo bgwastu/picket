@@ -3,7 +3,7 @@ FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 WORKDIR /app
 
 # Download Go modules
-COPY ../go.mod ../go.sum ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source files
@@ -17,18 +17,22 @@ RUN update-ca-certificates
 
 # Build
 ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOGC=75 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /beszel ./internal/cmd/hub
+RUN CGO_ENABLED=0 GOGC=75 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /picket ./internal/cmd/hub
+RUN CGO_ENABLED=0 GOGC=75 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /picket-agent ./internal/cmd/agent
 
 # ? -------------------------
 FROM scratch
 
-COPY --from=builder /beszel /
+COPY --from=builder /picket /
+COPY --from=builder /picket-agent /
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Ensure data persistence across container recreations
-VOLUME ["/beszel_data"]
+VOLUME ["/picket_data"]
+
+ENV PICKET_AGENT_BINARY=/picket-agent
 
 EXPOSE 8090
 
-ENTRYPOINT [ "/beszel" ]
+ENTRYPOINT [ "/picket" ]
 CMD ["serve", "--http=0.0.0.0:8090"]
