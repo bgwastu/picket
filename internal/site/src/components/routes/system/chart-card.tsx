@@ -1,5 +1,4 @@
-import { t } from "@lingui/core/macro"
-import { Trans, useLingui } from "@lingui/react/macro"
+import { t, Trans, useLingui } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { XIcon } from "lucide-react"
 import React, { type JSX, memo, useCallback, useEffect, useState } from "react"

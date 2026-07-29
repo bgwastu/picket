@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import AreaChartDefault from "@/components/charts/area-chart"
 import { useContainerDataPoints } from "@/components/charts/hooks"
 import { decimalString, toFixedFloat } from "@/lib/utils"

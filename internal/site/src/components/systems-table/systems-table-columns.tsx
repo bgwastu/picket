@@ -1,6 +1,5 @@
 /** biome-ignore-all lint/correctness/useHookAtTopLevel: Hooks live inside memoized column definitions */
-import { t } from "@lingui/core/macro"
-import { Trans, useLingui } from "@lingui/react/macro"
+import { t, Trans, useLingui } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { getPagePath } from "@nanostores/router"
 import type { CellContext, ColumnDef, HeaderContext } from "@tanstack/react-table"
@@ -18,25 +17,21 @@ import {
 	PenBoxIcon,
 	PlayCircleIcon,
 	ServerIcon,
-	TerminalSquareIcon,
 	Trash2Icon,
-	WifiIcon,
 } from "lucide-react"
 import { memo, useMemo, useRef, useState } from "react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
-import { isReadOnlyUser, pb } from "@/lib/api"
-import { BatteryState, ConnectionType, connectionTypeLabels, MeterState, SystemStatus } from "@/lib/enums"
-import { $longestSystemNameLen, $userSettings } from "@/lib/stores"
+import { pb } from "@/lib/api"
+import { ConnectionType, connectionTypeLabels, MeterState, SystemStatus } from "@/lib/enums"
+import { $displaySettings, $longestSystemNameLen } from "@/lib/stores"
 import {
 	cn,
 	copyToClipboard,
 	decimalString,
 	formatBytes,
-	formatTemperature,
 	parseSemVer,
 	secondsToUptimeString,
 } from "@/lib/utils"
-import { batteryStateTranslations } from "@/lib/i18n"
 import type { SystemRecord } from "@/types"
 import { SystemDialog } from "../add-system"
 import AlertButton from "../alerts/alert-button"
@@ -61,16 +56,10 @@ import {
 	DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
 import {
-	BatteryMediumIcon,
 	EthernetIcon,
 	GpuIcon,
 	HourglassIcon,
-	ThermometerIcon,
 	WebSocketIcon,
-	BatteryHighIcon,
-	BatteryLowIcon,
-	PlugChargingIcon,
-	BatteryFullIcon,
 } from "../ui/icons"
 
 const STATUS_COLORS = {
@@ -210,7 +199,7 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 			cell(info: CellContext<SystemRecord, unknown>) {
 				const { info: sysInfo, status } = info.row.original
 				const { major, minor } = parseSemVer(sysInfo.v)
-				const { colorWarn = 65, colorCrit = 90 } = useStore($userSettings, { keys: ["colorWarn", "colorCrit"] })
+				const { colorWarn = 65, colorCrit = 90 } = useStore($displaySettings, { keys: ["colorWarn", "colorCrit"] })
 				const loadAverages = sysInfo.la || []
 
 				const max = Math.max(...loadAverages)
@@ -251,118 +240,11 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 				if (val === undefined) {
 					return null
 				}
-				const userSettings = useStore($userSettings, { keys: ["unitNet"] })
+				const userSettings = useStore($displaySettings, { keys: ["unitNet"] })
 				const { value, unit } = formatBytes(val, true, userSettings.unitNet, false)
 				return (
 					<span className="tabular-nums whitespace-nowrap">
 						{decimalString(value, value >= 100 ? 1 : 2)} {unit}
-					</span>
-				)
-			},
-		},
-		{
-			accessorFn: ({ info }) => info.dt,
-			id: "temp",
-			name: () => t({ message: "Temp", comment: "Temperature label in systems table" }),
-			size: 50,
-			hideSort: true,
-			Icon: ThermometerIcon,
-			header: sortableHeader,
-			cell(info) {
-				const val = info.getValue() as number
-				const userSettings = useStore($userSettings, { keys: ["unitTemp"] })
-				if (!val) {
-					return null
-				}
-				const { value, unit } = formatTemperature(val, userSettings.unitTemp)
-				return (
-					<span className={cn("tabular-nums whitespace-nowrap", viewMode === "table" && "ps-0.5")}>
-						{decimalString(value, value >= 100 ? 1 : 2)} {unit}
-					</span>
-				)
-			},
-		},
-		{
-			accessorFn: ({ info }) => info.bat?.[0],
-			id: "battery",
-			name: () => t({ message: "Bat", comment: "Battery label in systems table header" }),
-			size: 70,
-			Icon: BatteryMediumIcon,
-			header: sortableHeader,
-			hideSort: true,
-			cell(info) {
-				const [pct, state] = info.row.original.info.bat ?? []
-				if (pct === undefined) {
-					return null
-				}
-
-				let Icon = PlugChargingIcon
-				let iconColor = "text-muted-foreground"
-
-				if (state !== BatteryState.Charging) {
-					if (pct < 25) {
-						iconColor = pct < 11 ? "text-red-500" : "text-yellow-500"
-						Icon = BatteryLowIcon
-					} else if (pct < 75) {
-						Icon = BatteryMediumIcon
-					} else if (pct < 95) {
-						Icon = BatteryHighIcon
-					} else {
-						Icon = BatteryFullIcon
-					}
-				}
-
-				const stateLabel =
-					state !== undefined ? (batteryStateTranslations[state as BatteryState]?.() ?? undefined) : undefined
-
-				return (
-					<Link
-						tabIndex={-1}
-						href={getPagePath($router, "system", { id: info.row.original.id })}
-						className="flex items-center gap-1 tabular-nums tracking-tight relative z-10"
-						title={stateLabel}
-					>
-						<Icon className={cn("size-3.5", iconColor)} />
-						<span className="min-w-10">{pct}%</span>
-					</Link>
-				)
-			},
-		},
-		{
-			accessorFn: ({ info }) => info.sv?.[0],
-			id: "services",
-			name: () => t`Services`,
-			size: 50,
-			Icon: TerminalSquareIcon,
-			header: sortableHeader,
-			hideSort: true,
-			sortingFn: (a, b) => {
-				// sort priorities: 1) failed services, 2) total services
-				const [totalCountA, numFailedA] = a.original.info.sv ?? [0, 0]
-				const [totalCountB, numFailedB] = b.original.info.sv ?? [0, 0]
-				if (numFailedA !== numFailedB) {
-					return numFailedA - numFailedB
-				}
-				return totalCountA - totalCountB
-			},
-			cell(info) {
-				const sys = info.row.original
-				const [totalCount, numFailed] = sys.info.sv ?? [0, 0]
-				if (sys.status !== SystemStatus.Up || totalCount === 0) {
-					return null
-				}
-				return (
-					<span className="tabular-nums whitespace-nowrap flex gap-1.5 items-center">
-						<span
-							className={cn("block size-2 rounded-full", {
-								[STATUS_COLORS[SystemStatus.Down]]: numFailed > 0,
-								[STATUS_COLORS[SystemStatus.Up]]: numFailed === 0,
-							})}
-						/>
-						{totalCount}{" "}
-						<span className="text-muted-foreground text-sm -ms-0.5">
-							({t`Failed`.toLowerCase()}: {numFailed})
-						</span>
 					</span>
 				)
 			},
@@ -381,48 +263,6 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 					return null
 				}
 				return <span className="tabular-nums whitespace-nowrap">{secondsToUptimeString(uptime)}</span>
-			},
-		},
-		{
-			accessorFn: ({ info }) => info.v,
-			id: "agent",
-			name: () => t`Agent`,
-			size: 50,
-			Icon: WifiIcon,
-			hideSort: true,
-			header: sortableHeader,
-			cell(info) {
-				const version = info.getValue() as string
-				if (!version) {
-					return null
-				}
-				const system = info.row.original
-				const color = {
-					"text-green-500": version === globalThis.BESZEL.HUB_VERSION,
-					"text-yellow-500": version !== globalThis.BESZEL.HUB_VERSION,
-					"text-red-500": system.status !== SystemStatus.Up,
-				}
-				return (
-					<Link
-						href={getPagePath($router, "system", { id: system.id })}
-						className={cn(
-							"flex gap-1.5 items-center md:pe-5 tabular-nums relative z-10",
-							viewMode === "table" && "ps-0.5"
-						)}
-						tabIndex={-1}
-						title={connectionTypeLabels[system.info.ct as ConnectionType]}
-						role="none"
-					>
-						{system.info.ct === ConnectionType.WebSocket && (
-							<WebSocketIcon className={cn("size-3 pointer-events-none", color)} />
-						)}
-						{system.info.ct === ConnectionType.SSH && (
-							<ChevronRightSquareIcon className={cn("size-3 pointer-events-none", color)} />
-						)}
-						{!system.info.ct && <IndicatorDot system={system} className={cn(color, "bg-current mx-0.5")} />}
-						<span className="truncate max-w-14">{info.getValue() as string}</span>
-					</Link>
-				)
 			},
 		},
 		{
@@ -459,7 +299,7 @@ function sortableHeader(context: HeaderContext<SystemRecord, unknown>) {
 }
 
 function TableCellWithMeter(info: CellContext<SystemRecord, unknown>) {
-	const { colorWarn = 65, colorCrit = 90 } = useStore($userSettings, { keys: ["colorWarn", "colorCrit"] })
+	const { colorWarn = 65, colorCrit = 90 } = useStore($displaySettings, { keys: ["colorWarn", "colorCrit"] })
 	const val = Number(info.getValue()) || 0
 	const threshold = getMeterStateByThresholds(val, colorWarn, colorCrit)
 	const meterClass = cn(
@@ -480,7 +320,7 @@ function TableCellWithMeter(info: CellContext<SystemRecord, unknown>) {
 }
 
 function DiskCellWithMultiple(info: CellContext<SystemRecord, unknown>) {
-	const { colorWarn = 65, colorCrit = 90 } = useStore($userSettings, { keys: ["colorWarn", "colorCrit"] })
+	const { colorWarn = 65, colorCrit = 90 } = useStore($displaySettings, { keys: ["colorWarn", "colorCrit"] })
 	const { info: sysInfo, status, id } = info.row.original
 	const extraFs = Object.entries(sysInfo.efs ?? {})
 	const rootDiskPct = sysInfo.dp
@@ -602,8 +442,7 @@ export const ActionsButton = memo(({ system }: { system: SystemRecord }) => {
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
-						{!isReadOnlyUser() && (
-							<DropdownMenuItem
+						<DropdownMenuItem
 								onSelect={() => {
 									editOpened.current = true
 									setEditOpen(true)
@@ -611,10 +450,8 @@ export const ActionsButton = memo(({ system }: { system: SystemRecord }) => {
 							>
 								<PenBoxIcon className="me-2.5 size-4" />
 								<Trans>Edit</Trans>
-							</DropdownMenuItem>
-						)}
+						</DropdownMenuItem>
 						<DropdownMenuItem
-							className={cn(isReadOnlyUser() && "hidden")}
 							onClick={() => {
 								pb.collection("systems").update(id, {
 									status: status === SystemStatus.Paused ? SystemStatus.Pending : SystemStatus.Paused,
@@ -641,8 +478,8 @@ export const ActionsButton = memo(({ system }: { system: SystemRecord }) => {
 							<CopyIcon className="me-2.5 size-4" />
 							<Trans>Copy host</Trans>
 						</DropdownMenuItem>
-						<DropdownMenuSeparator className={cn(isReadOnlyUser() && "hidden")} />
-						<DropdownMenuItem className={cn(isReadOnlyUser() && "hidden")} onSelect={() => setDeleteOpen(true)}>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem onSelect={() => setDeleteOpen(true)}>
 							<Trash2Icon className="me-2.5 size-4" />
 							<Trans>Delete</Trans>
 						</DropdownMenuItem>

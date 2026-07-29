@@ -11,20 +11,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/henrygd/beszel/agent/health"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/entities/system"
 )
 
 // ConnectionManager manages the connection state and events for the agent.
-// It handles both WebSocket and SSH connections, automatically switching between
-// them based on availability and managing reconnection attempts.
+// It manages the outbound WebSocket connection and reconnection attempts.
 type ConnectionManager struct {
 	agent          *Agent               // Reference to the parent agent
 	State          ConnectionState      // Current connection state
 	eventChan      chan ConnectionEvent // Channel for connection events
 	wsClient       *WebSocketClient     // WebSocket client for hub communication
-	serverOptions  ServerOptions        // Configuration for SSH server
 	wsTicker       *time.Ticker         // Ticker for WebSocket connection attempts
 	isConnecting   bool                 // Prevents multiple simultaneous reconnection attempts
 	ConnectionType system.ConnectionType
@@ -40,15 +37,12 @@ type ConnectionEvent uint8
 const (
 	Disconnected       ConnectionState = iota // No active connection
 	WebSocketConnected                        // Connected via WebSocket
-	SSHConnected                              // Connected via SSH
 )
 
 // Connection events
 const (
 	WebSocketConnect    ConnectionEvent = iota // WebSocket connection established
 	WebSocketDisconnect                        // WebSocket connection lost
-	SSHConnect                                 // SSH connection established
-	SSHDisconnect                              // SSH connection lost
 )
 
 const wsTickerInterval = 10 * time.Second
@@ -79,8 +73,8 @@ func (c *ConnectionManager) stopWsTicker() {
 }
 
 // Start begins connection attempts and enters the main event loop.
-// It handles connection events, periodic health updates, and graceful shutdown.
-func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
+// It handles connection events, reconnection, and graceful shutdown.
+func (c *ConnectionManager) Start() error {
 	if c.eventChan != nil {
 		return errors.New("already started")
 	}
@@ -91,7 +85,6 @@ func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
 	}
 	c.wsClient = wsClient
 
-	c.serverOptions = serverOptions
 	c.eventChan = make(chan ConnectionEvent, 1)
 
 	// signal handling for shutdown
@@ -101,18 +94,12 @@ func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
 	c.startWsTicker()
 	c.connect()
 
-	// update health status immediately and every 90 seconds
-	_ = health.Update()
-	healthTicker := time.Tick(90 * time.Second)
-
 	for {
 		select {
 		case connectionEvent := <-c.eventChan:
 			c.handleEvent(connectionEvent)
 		case <-c.wsTicker.C:
 			_ = c.startWebSocketConnection()
-		case <-healthTicker:
-			_ = health.Update()
 		case <-sigCtx.Done():
 			slog.Info("Shutting down", "cause", context.Cause(sigCtx))
 			return c.stop()
@@ -124,7 +111,7 @@ func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
 //
 // If we need or want to expose a graceful Stop method in the future, do something like this to actually stop the manager:
 //
-//	func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
+//	func (c *ConnectionManager) Start() error {
 //		ctx, cancel := context.WithCancel(context.Background())
 //		c.cancel = cancel
 //
@@ -140,9 +127,8 @@ func (c *ConnectionManager) Start(serverOptions ServerOptions) error {
 //		c.cancel()
 //	}
 func (c *ConnectionManager) stop() error {
-	_ = c.agent.StopServer()
 	c.closeWebSocket()
-	return health.CleanUp()
+	return nil
 }
 
 // handleEvent processes connection events and updates the connection state accordingly.
@@ -150,14 +136,8 @@ func (c *ConnectionManager) handleEvent(event ConnectionEvent) {
 	switch event {
 	case WebSocketConnect:
 		c.handleStateChange(WebSocketConnected)
-	case SSHConnect:
-		c.handleStateChange(SSHConnected)
 	case WebSocketDisconnect:
 		if c.State == WebSocketConnected {
-			c.handleStateChange(Disconnected)
-		}
-	case SSHDisconnect:
-		if c.State == SSHConnected {
 			c.handleStateChange(Disconnected)
 		}
 	}
@@ -174,13 +154,6 @@ func (c *ConnectionManager) handleStateChange(newState ConnectionState) {
 	case WebSocketConnected:
 		slog.Info("WebSocket connected", "host", c.wsClient.hubURL.Host)
 		c.ConnectionType = system.ConnectionTypeWebSocket
-		c.stopWsTicker()
-		_ = c.agent.StopServer()
-		c.isConnecting = false
-	case SSHConnected:
-		// stop new ws connection attempts
-		slog.Info("SSH connection established")
-		c.ConnectionType = system.ConnectionTypeSSH
 		c.stopWsTicker()
 		c.isConnecting = false
 	case Disconnected:
@@ -199,7 +172,7 @@ func (c *ConnectionManager) handleStateChange(newState ConnectionState) {
 }
 
 // connect handles the connection logic with proper delays and priority.
-// It attempts WebSocket connection first, falling back to SSH server if needed.
+// It retries the outbound WebSocket connection after failures.
 func (c *ConnectionManager) connect() {
 	c.isConnecting = true
 	defer func() {
@@ -210,7 +183,6 @@ func (c *ConnectionManager) connect() {
 		time.Sleep(5 * time.Second)
 	}
 
-	// Try WebSocket first, if it fails, start SSH server
 	err := c.startWebSocketConnection()
 	if err != nil {
 		if shouldExitOnErr(err) {
@@ -218,10 +190,7 @@ func (c *ConnectionManager) connect() {
 			_ = c.stop()
 			os.Exit(1)
 		}
-		if c.State == Disconnected {
-			c.startSSHServer()
-			c.startWsTicker()
-		}
+		c.startWsTicker()
 	}
 }
 
@@ -243,13 +212,6 @@ func (c *ConnectionManager) startWebSocketConnection() error {
 		c.closeWebSocket()
 	}
 	return err
-}
-
-// startSSHServer starts the SSH server if the agent is currently disconnected.
-func (c *ConnectionManager) startSSHServer() {
-	if c.State == Disconnected {
-		go c.agent.StartServer(c.serverOptions)
-	}
 }
 
 // closeWebSocket closes the WebSocket connection if it exists.

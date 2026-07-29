@@ -29,10 +29,6 @@ func (rm *RecordManager) DeleteOldRecords() {
 		if err != nil {
 			slog.Error("Error deleting old alerts history", "err", err)
 		}
-		err = deleteOldQuietHours(txApp)
-		if err != nil {
-			slog.Error("Error deleting old quiet hours", "err", err)
-		}
 		return nil
 	})
 }
@@ -40,20 +36,16 @@ func (rm *RecordManager) DeleteOldRecords() {
 // Delete old alerts history records
 func deleteOldAlertsHistory(app core.App, countToKeep, countBeforeDeletion int) error {
 	db := app.DB()
-	var users []struct {
-		Id string `db:"user"`
-	}
-	err := db.NewQuery("SELECT user, COUNT(*) as count FROM alerts_history GROUP BY user HAVING count > {:countBeforeDeletion}").Bind(dbx.Params{"countBeforeDeletion": countBeforeDeletion}).All(&users)
+	var count int
+	err := db.NewQuery("SELECT COUNT(*) FROM alerts_history").Row(&count)
 	if err != nil {
 		return err
 	}
-	for _, user := range users {
-		_, err = db.NewQuery("DELETE FROM alerts_history WHERE user = {:user} AND id NOT IN (SELECT id FROM alerts_history WHERE user = {:user} ORDER BY created DESC LIMIT {:countToKeep})").Bind(dbx.Params{"user": user.Id, "countToKeep": countToKeep}).Execute()
-		if err != nil {
-			return err
-		}
+	if count <= countBeforeDeletion {
+		return nil
 	}
-	return nil
+	_, err = db.NewQuery("DELETE FROM alerts_history WHERE id NOT IN (SELECT id FROM alerts_history ORDER BY created DESC LIMIT {:countToKeep})").Bind(dbx.Params{"countToKeep": countToKeep}).Execute()
+	return err
 }
 
 // Deletes system_stats records older than what is displayed in the UI
@@ -121,17 +113,6 @@ func deleteOldContainerRecords(app core.App) error {
 	_, err := app.DB().NewQuery("DELETE FROM containers WHERE updated < {:updated}").Bind(dbx.Params{"updated": tenMinutesAgo.UnixMilli()}).Execute()
 	if err != nil {
 		return fmt.Errorf("failed to delete old container records: %v", err)
-	}
-
-	return nil
-}
-
-// Deletes old quiet hours records where end date has passed
-func deleteOldQuietHours(app core.App) error {
-	now := time.Now().UTC()
-	_, err := app.DB().NewQuery("DELETE FROM quiet_hours WHERE type = 'one-time' AND end < {:now}").Bind(dbx.Params{"now": now}).Execute()
-	if err != nil {
-		return err
 	}
 
 	return nil

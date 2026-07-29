@@ -1,6 +1,5 @@
 /** biome-ignore-all lint/security/noDangerouslySetInnerHtml: html comes directly from docker via agent */
-import { t } from "@lingui/core/macro"
-import { Trans } from "@lingui/react/macro"
+import { t, Trans } from "@/lib/english"
 import {
 	type ColumnFiltersState,
 	flexRender,
@@ -22,18 +21,16 @@ import type { ContainerRecord } from "@/types"
 import { containerChartCols } from "@/components/containers-table/containers-table-columns"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { type ContainerHealth, ContainerHealthLabels } from "@/lib/enums"
-import { cn, useBrowserStorage } from "@/lib/utils"
+import { cn, copyToClipboard, useBrowserStorage } from "@/lib/utils"
 import { Sheet, SheetTitle, SheetHeader, SheetContent, SheetDescription } from "../ui/sheet"
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog"
 import { Button } from "@/components/ui/button"
 import { $allSystemsById } from "@/lib/stores"
-import { LoaderCircleIcon, MaximizeIcon, RefreshCwIcon, XIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, LoaderCircleIcon, MaximizeIcon, RefreshCwIcon, XIcon } from "lucide-react"
 import { Separator } from "../ui/separator"
 import { $router, Link } from "../router"
 import { listenKeys } from "nanostores"
 import { getPagePath } from "@nanostores/router"
-
-const syntaxTheme = "github-dark-dimmed"
 
 export default function ContainersTable({ systemId }: { systemId?: string }) {
 	const loadTime = Date.now()
@@ -272,35 +269,13 @@ const AllContainersTable = memo(function AllContainersTable({
 	)
 })
 
-async function getLogsHtml(container: ContainerRecord): Promise<string> {
+async function getLogs(container: ContainerRecord): Promise<string> {
 	try {
-		const [{ highlighter }, logsHtml] = await Promise.all([
-			import("@/lib/shiki"),
-			pb.send<{ logs: string }>("/api/beszel/containers/logs", {
+		const logsResponse = await pb.send<{ logs: string }>("/api/picket/containers/logs", {
 				system: container.system,
 				container: container.id,
-			}),
-		])
-		return logsHtml.logs ? highlighter.codeToHtml(logsHtml.logs, { lang: "log", theme: syntaxTheme }) : t`No results.`
-	} catch (error) {
-		console.error(error)
-		return ""
-	}
-}
-
-async function getInfoHtml(container: ContainerRecord): Promise<string> {
-	try {
-		let [{ highlighter }, { info }] = await Promise.all([
-			import("@/lib/shiki"),
-			pb.send<{ info: string }>("/api/beszel/containers/info", {
-				system: container.system,
-				container: container.id,
-			}),
-		])
-		try {
-			info = JSON.stringify(JSON.parse(info), null, 2)
-		} catch (_) {}
-		return info ? highlighter.codeToHtml(info, { lang: "json", theme: syntaxTheme }) : t`No results.`
+		})
+		return logsResponse.logs ?? ""
 	} catch (error) {
 		console.error(error)
 		return ""
@@ -317,10 +292,9 @@ function ContainerSheet({
 	activeContainer: RefObject<ContainerRecord | null>
 }) {
 	const [logsDisplay, setLogsDisplay] = useState<string>("")
-	const [infoDisplay, setInfoDisplay] = useState<string>("")
 	const [logsFullscreenOpen, setLogsFullscreenOpen] = useState<boolean>(false)
-	const [infoFullscreenOpen, setInfoFullscreenOpen] = useState<boolean>(false)
 	const [isRefreshingLogs, setIsRefreshingLogs] = useState<boolean>(false)
+	const [logsCopied, setLogsCopied] = useState(false)
 	const logsContainerRef = useRef<HTMLDivElement>(null)
 
 	const container = activeContainer.current
@@ -337,8 +311,7 @@ function ContainerSheet({
 		const startTime = Date.now()
 
 		try {
-			const logsHtml = await getLogsHtml(container)
-			setLogsDisplay(logsHtml)
+			setLogsDisplay(await getLogs(container))
 			setTimeout(scrollLogsToBottom, 20)
 		} catch (error) {
 			console.error(error)
@@ -354,12 +327,9 @@ function ContainerSheet({
 
 	useEffect(() => {
 		setLogsDisplay("")
-		setInfoDisplay("")
 		if (!container) return
 		;(async () => {
-			const [logsHtml, infoHtml] = await Promise.all([getLogsHtml(container), getInfoHtml(container)])
-			setLogsDisplay(logsHtml)
-			setInfoDisplay(infoHtml)
+			setLogsDisplay(await getLogs(container))
 			setTimeout(scrollLogsToBottom, 20)
 		})()
 	}, [container])
@@ -376,14 +346,8 @@ function ContainerSheet({
 				onRefresh={refreshLogs}
 				isRefreshing={isRefreshingLogs}
 			/>
-			<InfoFullscreenDialog
-				open={infoFullscreenOpen}
-				onOpenChange={setInfoFullscreenOpen}
-				infoDisplay={infoDisplay}
-				containerName={container.name}
-			/>
 			<Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-				<SheetContent className="w-full sm:max-w-220 p-2">
+				<SheetContent className="w-full sm:max-w-220 p-0">
 					<SheetHeader>
 						<SheetTitle>{container.name}</SheetTitle>
 						<SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -406,14 +370,16 @@ function ContainerSheet({
 							{ContainerHealthLabels[container.health as ContainerHealth]} */}
 						</SheetDescription>
 					</SheetHeader>
-					<div className="px-3 pb-3 -mt-4 flex flex-col gap-3 h-full items-start">
-						<div className="flex items-center w-full">
-							<h3>{t`Logs`}</h3>
+					<div className="flex h-full min-h-0 flex-col bg-muted/20">
+						<div className="flex items-center justify-between border-y px-5 py-3">
+							<div><h3 className="font-medium">{t`Logs`}</h3><p className="text-xs text-muted-foreground">Live output from {container.name}</p></div>
+							<div className="flex items-center gap-1">
+							<Button variant="ghost" size="icon" aria-label={logsCopied ? t`Copied` : t`Copy logs`} onClick={() => { void copyToClipboard(logsDisplay); setLogsCopied(true); setTimeout(() => setLogsCopied(false), 1500) }} disabled={!logsDisplay}>{logsCopied ? <CheckIcon className="size-4 text-green-500" /> : <CopyIcon className="size-4" />}</Button>
 							<Button
 								variant="ghost"
 								size="sm"
 								onClick={refreshLogs}
-								className="h-8 w-8 p-0 ms-auto"
+								className="h-8 w-8 p-0"
 								disabled={isRefreshingLogs}
 							>
 								<RefreshCwIcon
@@ -423,34 +389,10 @@ function ContainerSheet({
 							<Button variant="ghost" size="sm" onClick={() => setLogsFullscreenOpen(true)} className="h-8 w-8 p-0">
 								<MaximizeIcon className="size-4" />
 							</Button>
+							</div>
 						</div>
-						<div
-							ref={logsContainerRef}
-							className={cn(
-								"max-h-[calc(50dvh-10rem)] w-full overflow-auto p-3 rounded-md bg-gh-dark text-white text-sm",
-								!logsDisplay && ["animate-pulse", "h-full"]
-							)}
-						>
-							<div dangerouslySetInnerHTML={{ __html: logsDisplay }} />
-						</div>
-						<div className="flex items-center w-full">
-							<h3>{t`Detail`}</h3>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => setInfoFullscreenOpen(true)}
-								className="h-8 w-8 p-0 ms-auto"
-							>
-								<MaximizeIcon className="size-4" />
-							</Button>
-						</div>
-						<div
-							className={cn(
-								"grow h-[calc(50dvh-4rem)] w-full overflow-auto p-3 rounded-md bg-gh-dark text-white text-sm",
-								!infoDisplay && "animate-pulse"
-							)}
-						>
-							<div dangerouslySetInnerHTML={{ __html: infoDisplay }} />
+						<div ref={logsContainerRef} className="min-h-0 flex-1 overflow-auto bg-[#101317] p-4 font-mono text-[12px] leading-6 text-zinc-200">
+							<LogLines logs={logsDisplay} />
 						</div>
 					</div>
 				</SheetContent>
@@ -508,6 +450,22 @@ const ContainerTableRow = memo(function ContainerTableRow({
 	)
 })
 
+function LogLines({ logs }: { logs: string }) {
+	if (!logs) {
+		return <div className="py-10 text-center text-zinc-500">{t`No logs available.`}</div>
+	}
+	return (
+		<div className="min-w-max">
+			{logs.split("\n").map((line, index) => (
+				<div className="flex min-h-6" key={`${index}-${line}`}>
+					<span className="sticky left-0 w-12 shrink-0 select-none border-r border-white/10 bg-[#101317] pe-3 text-right text-zinc-600">{index + 1}</span>
+					<span className="whitespace-pre px-4">{line || " "}</span>
+				</div>
+			))}
+		</div>
+	)
+}
+
 function LogsFullscreenDialog({
 	open,
 	onOpenChange,
@@ -541,10 +499,8 @@ function LogsFullscreenDialog({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="w-[calc(100vw-20px)] h-[calc(100dvh-20px)] max-w-none p-0 bg-gh-dark border-0 text-white">
 				<DialogTitle className="sr-only">{containerName} logs</DialogTitle>
-				<div ref={outerContainerRef} className="h-full overflow-auto">
-					<div className="h-full w-full px-3 leading-relaxed rounded-md bg-gh-dark text-sm">
-						<div className="py-3" dangerouslySetInnerHTML={{ __html: logsDisplay }} />
-					</div>
+				<div ref={outerContainerRef} className="h-full overflow-auto bg-[#101317] p-5 font-mono text-[12px] leading-6 text-zinc-200">
+					<LogLines logs={logsDisplay} />
 				</div>
 				<button
 					onClick={onRefresh}
@@ -555,31 +511,6 @@ function LogsFullscreenDialog({
 				>
 					<RefreshCwIcon className={`size-4 transition-transform duration-300 ${isRefreshing ? "animate-spin" : ""}`} />
 				</button>
-			</DialogContent>
-		</Dialog>
-	)
-}
-
-function InfoFullscreenDialog({
-	open,
-	onOpenChange,
-	infoDisplay,
-	containerName,
-}: {
-	open: boolean
-	onOpenChange: (open: boolean) => void
-	infoDisplay: string
-	containerName: string
-}) {
-	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="w-[calc(100vw-20px)] h-[calc(100dvh-20px)] max-w-none p-0 bg-gh-dark border-0 text-white">
-				<DialogTitle className="sr-only">{containerName} info</DialogTitle>
-				<div className="flex-1 overflow-auto">
-					<div className="h-full w-full overflow-auto p-3 rounded-md bg-gh-dark text-sm leading-relaxed">
-						<div dangerouslySetInnerHTML={{ __html: infoDisplay }} />
-					</div>
-				</div>
 			</DialogContent>
 		</Dialog>
 	)

@@ -1,9 +1,8 @@
-import { t } from "@lingui/core/macro"
+import { t, Trans } from "@/lib/english"
 import { MoonStarIcon, SunIcon, SunMoonIcon } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip"
-import { Trans } from "@lingui/react/macro"
 import { cn } from "@/lib/utils"
 
 const themes = ["light", "dark", "system"] as const

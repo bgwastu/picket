@@ -2,53 +2,40 @@
 package hub
 
 import (
-	"crypto/ed25519"
-	"encoding/pem"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/henrygd/beszel/internal/alerts"
-	"github.com/henrygd/beszel/internal/hub/config"
-	"github.com/henrygd/beszel/internal/hub/heartbeat"
 	"github.com/henrygd/beszel/internal/hub/systems"
 	"github.com/henrygd/beszel/internal/hub/utils"
 	"github.com/henrygd/beszel/internal/records"
-	"github.com/henrygd/beszel/internal/users"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
-	"golang.org/x/crypto/ssh"
 )
 
 // Hub is the application. It embeds the PocketBase app and keeps references to subcomponents.
 type Hub struct {
 	core.App
 	*alerts.AlertManager
-	um     *users.UserManager
-	rm     *records.RecordManager
-	sm     *systems.SystemManager
-	hb     *heartbeat.Heartbeat
-	hbStop chan struct{}
-	pubKey string
-	signer ssh.Signer
-	appURL string
+	rm                    *records.RecordManager
+	sm                    *systems.SystemManager
+	appURL                string
+	dashboardPasswordHash string
 }
 
 // NewHub creates a new Hub instance with default configuration
 func NewHub(app core.App) *Hub {
 	hub := &Hub{App: app}
 	hub.AlertManager = alerts.NewAlertManager(hub)
-	hub.um = users.NewUserManager(hub)
 	hub.rm = records.NewRecordManager(hub)
 	hub.sm = systems.NewSystemManager(hub)
-	hub.hb = heartbeat.New(app, utils.GetEnv)
-	if hub.hb != nil {
-		hub.hbStop = make(chan struct{})
-	}
 	_ = onAfterBootstrapAndMigrations(app, hub.initialize)
 	return hub
 }
@@ -75,10 +62,6 @@ func onAfterBootstrapAndMigrations(app core.App, fn func(app core.App) error) er
 // StartHub sets up event handlers and starts the PocketBase server
 func (h *Hub) StartHub() error {
 	h.App.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		// sync systems with config
-		if err := config.SyncSystems(e); err != nil {
-			return err
-		}
 		// register middlewares
 		h.registerMiddlewares(e)
 		// register api routes
@@ -97,17 +80,8 @@ func (h *Hub) StartHub() error {
 		if err := h.sm.Initialize(); err != nil {
 			return err
 		}
-		// start heartbeat if configured
-		if h.hb != nil {
-			go h.hb.Start(h.hbStop)
-		}
 		return e.Next()
 	})
-
-	// TODO: move to users package
-	// handle default values for user / user_settings creation
-	h.App.OnRecordCreate("users").BindFunc(h.um.InitializeUserRole)
-	h.App.OnRecordCreate("user_settings").BindFunc(h.um.InitializeUserSettings)
 
 	pb, ok := h.App.(*pocketbase.PocketBase)
 	if !ok {
@@ -127,11 +101,24 @@ func (h *Hub) initialize(app core.App) error {
 		h.appURL = appURL
 		settings.Meta.AppURL = appURL
 	}
+	passwordFile := filepath.Join(app.DataDir(), ".hub-password-hash")
+	if password, isSet := utils.GetEnv("PASSWORD"); isSet && password != "" {
+		h.dashboardPasswordHash = hashDashboardPassword(password)
+		if err := os.WriteFile(passwordFile, []byte(h.dashboardPasswordHash), 0600); err != nil {
+			return err
+		}
+	} else if hash, err := os.ReadFile(passwordFile); err == nil {
+		h.dashboardPasswordHash = strings.TrimSpace(string(hash))
+	}
 	if err := app.Save(settings); err != nil {
 		return err
 	}
-	// set auth settings
-	return setCollectionAuthSettings(app)
+	return setCollectionAccessSettings(app)
+}
+
+func hashDashboardPassword(password string) string {
+	hash := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hash[:])
 }
 
 // registerCronJobs sets up scheduled tasks
@@ -141,58 +128,6 @@ func (h *Hub) registerCronJobs(_ *core.ServeEvent) error {
 	// create longer records every 10 minutes
 	h.Cron().MustAdd("create longer records", "*/10 * * * *", h.rm.CreateLongerRecords)
 	return nil
-}
-
-// GetSSHKey generates key pair if it doesn't exist and returns signer
-func (h *Hub) GetSSHKey(dataDir string) (ssh.Signer, error) {
-	if h.signer != nil {
-		return h.signer, nil
-	}
-
-	if dataDir == "" {
-		dataDir = h.DataDir()
-	}
-
-	privateKeyPath := path.Join(dataDir, "id_ed25519")
-
-	// check if the key pair already exists
-	existingKey, err := os.ReadFile(privateKeyPath)
-	if err == nil {
-		private, err := ssh.ParsePrivateKey(existingKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse private key: %s", err)
-		}
-		pubKeyBytes := ssh.MarshalAuthorizedKey(private.PublicKey())
-		h.pubKey = strings.TrimSuffix(string(pubKeyBytes), "\n")
-		return private, nil
-	} else if !os.IsNotExist(err) {
-		// File exists but couldn't be read for some other reason
-		return nil, fmt.Errorf("failed to read %s: %w", privateKeyPath, err)
-	}
-
-	// Generate the Ed25519 key pair
-	_, privKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		return nil, err
-	}
-	privKeyPem, err := ssh.MarshalPrivateKey(privKey, "")
-	if err != nil {
-		return nil, err
-	}
-
-	if err := os.WriteFile(privateKeyPath, pem.EncodeToMemory(privKeyPem), 0600); err != nil {
-		return nil, fmt.Errorf("failed to write private key to %q: err: %w", privateKeyPath, err)
-	}
-
-	// These are fine to ignore the errors on, as we've literally just created a crypto.PublicKey | crypto.Signer
-	sshPrivate, _ := ssh.NewSignerFromSigner(privKey)
-	pubKeyBytes := ssh.MarshalAuthorizedKey(sshPrivate.PublicKey())
-	h.pubKey = strings.TrimSuffix(string(pubKeyBytes), "\n")
-
-	h.Logger().Info("ed25519 key pair generated successfully.")
-	h.Logger().Info("Saved to: " + privateKeyPath)
-
-	return sshPrivate, err
 }
 
 // MakeLink formats a link with the app URL and path segments.

@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { BellIcon } from "lucide-react"
 import { memo, useMemo, useState } from "react"

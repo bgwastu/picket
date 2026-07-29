@@ -1,5 +1,5 @@
 import { memo, useState } from "react"
-import { Trans } from "@lingui/react/macro"
+import { Trans } from "@/lib/english"
 import { compareSemVer, parseSemVer } from "@/lib/utils"
 import type { GPUData } from "@/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,17 +9,14 @@ import { CpuChart, ContainerCpuChart } from "./system/charts/cpu-charts"
 import { MemoryChart, ContainerMemoryChart, SwapChart } from "./system/charts/memory-charts"
 import { RootDiskCharts, ExtraFsCharts } from "./system/charts/disk-charts"
 import { BandwidthChart, ContainerNetworkChart } from "./system/charts/network-charts"
-import { TemperatureChart, BatteryChart } from "./system/charts/sensor-charts"
 import { GpuPowerChart, GpuDetailCharts } from "./system/charts/gpu-charts"
-import { LazyContainersTable, LazySmartTable, LazySystemdTable } from "./system/lazy-tables"
+import { LazyContainersTable } from "./system/lazy-tables"
 import { LoadAverageChart } from "./system/charts/load-average-chart"
-import { ContainerIcon, CpuIcon, HardDriveIcon, TerminalSquareIcon } from "lucide-react"
+import { ContainerIcon, CpuIcon, HardDriveIcon } from "lucide-react"
 import { GpuIcon } from "../ui/icons"
-import SystemdTable from "../systemd-table/systemd-table"
 import ContainersTable from "../containers-table/containers-table"
 
 const SEMVER_0_14_0 = parseSemVer("0.14.0")
-const SEMVER_0_15_0 = parseSemVer("0.15.0")
 
 export default memo(function SystemDetail({ id }: { id: string }) {
 	const systemData = useSystemData(id)
@@ -50,25 +47,18 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 		hasGpuPowerData,
 	} = systemData
 
-	// extra margin to add to bottom of page, specifically for temperature chart,
-	// where the tooltip can go past the bottom of the page if lots of sensors
-	const [pageBottomExtraMargin, setPageBottomExtraMargin] = useState(0)
-
 	if (!system.id) {
-		return null
+		return <div className="py-16 text-center text-muted-foreground">Loading agent...</div>
 	}
 
 	const hasContainers = containerData.length > 0
-	const maybeHasSmartData = compareSemVer(chartData.agentVersion, SEMVER_0_15_0) >= 0
 	const hasContainersTable = hasContainers && compareSemVer(chartData.agentVersion, SEMVER_0_14_0) >= 0
-	const hasSystemd = system.info.sv
 	const hasGpu = hasGpuData || hasGpuPowerData
 
 	// keep tabsRef in sync for keyboard navigation
 	const tabs = ["core", "disk"]
 	if (hasGpu) tabs.push("gpu")
 	if (hasContainers) tabs.push("containers")
-	if (hasSystemd) tabs.push("services")
 	tabsRef.current = tabs
 
 	// shared chart props
@@ -121,9 +111,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 
 					<LoadAverageChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} />
 
-					<TemperatureChart {...coreProps} />
-
-					<BatteryChart {...coreProps} />
 
 					{hasGpuPowerData && <GpuPowerChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} />}
 				</div>
@@ -140,11 +127,8 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 
 				<ExtraFsCharts systemData={systemData} />
 
-				{maybeHasSmartData && <LazySmartTable systemId={system.id} />}
-
 				{hasContainersTable && <LazyContainersTable systemId={system.id} />}
 
-				{hasSystemd && <LazySystemdTable systemId={system.id} />}
 			</>
 		)
 	}
@@ -173,12 +157,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 							<Trans>Containers</Trans>
 						</TabsTrigger>
 					)}
-					{hasSystemd && (
-						<TabsTrigger value="services" className="w-full flex items-center gap-2">
-							<TerminalSquareIcon className="size-3.5" />
-							<Trans>Services</Trans>
-						</TabsTrigger>
-					)}
 				</TabsList>
 
 				<TabsContent value="core" forceMount className={activeTab === "core" ? "contents" : "hidden"}>
@@ -187,10 +165,7 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 						<MemoryChart {...coreProps} />
 						<LoadAverageChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} />
 						<BandwidthChart {...coreProps} systemStats={systemStats} />
-						<TemperatureChart {...coreProps} setPageBottomExtraMargin={setPageBottomExtraMargin} />
-						<BatteryChart {...coreProps} />
 						<SwapChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} systemStats={systemStats} />
-						{pageBottomExtraMargin > 0 && <div style={{ marginBottom: pageBottomExtraMargin }}></div>}
 					</div>
 				</TabsContent>
 
@@ -201,7 +176,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 								<RootDiskCharts systemData={systemData} />
 							</div>
 							<ExtraFsCharts systemData={systemData} />
-							{maybeHasSmartData && <LazySmartTable systemId={system.id} />}
 						</>
 					)}
 				</TabsContent>
@@ -256,11 +230,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 					</TabsContent>
 				)}
 
-				{hasSystemd && (
-					<TabsContent value="services" forceMount className={activeTab === "services" ? "contents" : "hidden"}>
-						{mountedTabs.has("services") && <SystemdTable systemId={system.id} />}
-					</TabsContent>
-				)}
 			</Tabs>
 		)
 	}

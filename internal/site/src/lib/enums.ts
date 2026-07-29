@@ -37,15 +37,6 @@ export enum SystemStatus {
 	Paused = "paused",
 }
 
-/** Battery state */
-export enum BatteryState {
-	Unknown,
-	Empty,
-	Full,
-	Charging,
-	Discharging,
-	Idle,
-}
 
 /** Time format */
 export enum HourFormat {

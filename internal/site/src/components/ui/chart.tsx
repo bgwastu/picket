@@ -1,5 +1,5 @@
 import type { JSX } from "react"
-import { useLingui } from "@lingui/react/macro"
+import { useLingui } from "@/lib/english"
 import * as React from "react"
 import * as RechartsPrimitive from "recharts"
 import { chartTimeData, cn } from "@/lib/utils"

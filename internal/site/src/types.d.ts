@@ -1,33 +1,19 @@
 import type { RecordModel } from "pocketbase"
-import type { Unit, Os, BatteryState, HourFormat, ConnectionType, ServiceStatus, ServiceSubState } from "@/lib/enums"
+import type { Unit, Os, HourFormat, ConnectionType, ServiceStatus, ServiceSubState } from "@/lib/enums"
 
 // global window properties
 declare global {
-	var BESZEL: {
+	var PICKET: {
 		BASE_PATH: string
 		HUB_VERSION: string
 		HUB_URL: string
-		OAUTH_DISABLE_POPUP: boolean
-	}
-}
-
-export interface FingerprintRecord extends RecordModel {
-	id: string
-	system: string
-	fingerprint: string
-	token: string
-	expand: {
-		system: {
-			name: string
-		}
 	}
 }
 
 export interface SystemRecord extends RecordModel {
 	name: string
-	host: string
+	host?: string
 	status: "up" | "down" | "paused" | "pending"
-	port: string
 	info: SystemInfo
 	v: string
 	updated: string
@@ -56,8 +42,6 @@ export interface SystemInfo {
 	mp: number
 	/** disk percent */
 	dp: number
-	/** battery percent and state */
-	bat?: [number, BatteryState]
 	/** bandwidth (mb) */
 	b: number
 	/** bandwidth bytes */
@@ -68,8 +52,6 @@ export interface SystemInfo {
 	p?: boolean
 	/** highest gpu utilization */
 	g?: number
-	/** dashboard display temperature */
-	dt?: number
 	/** operating system */
 	os?: Os
 	/** connection type */
@@ -141,14 +123,10 @@ export interface SystemStats {
 	nrm?: number
 	/** max network sent (bytes) */
 	bm?: [number, number]
-	/** temperatures */
-	t?: Record<string, number>
 	/** extra filesystems */
 	efs?: Record<string, ExtraFsStats>
 	/** GPU data */
 	g?: Record<string, GPUData>
-	/** battery percent and state */
-	bat?: [number, BatteryState]
 	/** network interfaces [upload bytes, download bytes, total upload bytes, total download bytes] */
 	ni?: Record<string, [number, number, number, number]>
 }
@@ -244,20 +222,6 @@ export interface AlertsHistoryRecord extends RecordModel {
 	resolved?: string | null
 }
 
-export interface QuietHoursRecord extends RecordModel {
-	id: string
-	user: string
-	system: string
-	type: "one-time" | "daily"
-	start: string
-	end: string
-	expand?: {
-		system?: {
-			name: string
-		}
-	}
-}
-
 export interface ContainerRecord extends RecordModel {
 	id: string
 	system: string
@@ -286,17 +250,19 @@ export interface ChartTimeData {
 	}
 }
 
-export interface UserSettings {
+export interface DisplaySettings {
 	chartTime: ChartTimes
-	emails?: string[]
-	webhooks?: string[]
-	unitTemp?: Unit
 	unitNet?: Unit
 	unitDisk?: Unit
 	colorWarn?: number
 	colorCrit?: number
 	hourFormat?: HourFormat
 	layoutWidth?: number
+}
+
+export interface NotificationSettings {
+	telegramBotToken: string
+	telegramUserIds: string[]
 }
 
 type ChartDataContainer = {
@@ -337,48 +303,6 @@ export interface AlertInfo {
 
 export type AlertMap = Record<string, Map<string, AlertRecord>>
 
-export interface SmartData {
-	/** model family */
-	// mf?: string
-	/** model name */
-	mn?: string
-	/** serial number */
-	sn?: string
-	/** firmware version */
-	fv?: string
-	/** capacity */
-	c?: number
-	/** smart status */
-	s?: string
-	/** disk name (like /dev/sda) */
-	dn?: string
-	/** disk type */
-	dt?: string
-	/** temperature */
-	t?: number
-	/** attributes */
-	a?: SmartAttribute[]
-}
-
-export interface SmartAttribute {
-	/** id */
-	id?: number
-	/** name */
-	n: string
-	/** value */
-	v: number
-	/** worst */
-	w?: number
-	/** threshold */
-	t?: number
-	/** raw value */
-	rv?: number
-	/** raw string */
-	rs?: string
-	/** when failed */
-	wf?: string
-}
-
 export interface SystemDetailsRecord extends RecordModel {
 	system: string
 	hostname: string
@@ -390,23 +314,6 @@ export interface SystemDetailsRecord extends RecordModel {
 	os_name: string
 	memory: number
 	podman: boolean
-}
-
-export interface SmartDeviceRecord extends RecordModel {
-	id: string
-	system: string
-	name: string
-	model: string
-	state: string
-	capacity: number
-	temp: number
-	firmware: string
-	serial: string
-	type: string
-	hours: number
-	cycles: number
-	attributes: SmartAttribute[]
-	updated: string
 }
 
 export interface SystemdRecord extends RecordModel {
@@ -534,15 +441,4 @@ export interface SystemdServiceDetails {
 	WantedBy: any[]
 	Wants: string[]
 	WantsMountsFor: any[]
-}
-
-export interface BeszelInfo {
-	key: string // public key
-	v: string // version
-	cu: boolean // check updates
-}
-
-export interface UpdateInfo {
-	v: string // new version
-	url: string // url to new version
 }

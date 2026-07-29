@@ -1,309 +1,273 @@
 package hub
 
 import (
-	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
-	"time"
 
-	"github.com/blang/semver"
-	"github.com/google/uuid"
 	"github.com/henrygd/beszel"
 	"github.com/henrygd/beszel/internal/alerts"
-	"github.com/henrygd/beszel/internal/ghupdate"
-	"github.com/henrygd/beszel/internal/hub/config"
 	"github.com/henrygd/beszel/internal/hub/systems"
 	"github.com/henrygd/beszel/internal/hub/utils"
 	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// UpdateInfo holds information about the latest update check
-type UpdateInfo struct {
-	lastCheck time.Time
-	Version   string `json:"v"`
-	Url       string `json:"url"`
-}
-
 var containerIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
-
-// Middleware to allow only admin role users
-var requireAdminRole = customAuthMiddleware(func(e *core.RequestEvent) bool {
-	return e.Auth.GetString("role") == "admin"
-})
-
-// Middleware to exclude readonly users
-var excludeReadOnlyRole = customAuthMiddleware(func(e *core.RequestEvent) bool {
-	return e.Auth.GetString("role") != "readonly"
-})
-
-// customAuthMiddleware handles boilerplate for custom authentication middlewares. fn should
-// return true if the request is allowed, false otherwise. e.Auth is guaranteed to be non-nil.
-func customAuthMiddleware(fn func(*core.RequestEvent) bool) func(*core.RequestEvent) error {
-	return func(e *core.RequestEvent) error {
-		if e.Auth == nil {
-			return e.UnauthorizedError("The request requires valid record authorization token.", nil)
-		}
-		if !fn(e) {
-			return e.ForbiddenError("The authorized record is not allowed to perform this action.", nil)
-		}
-		return e.Next()
-	}
-}
 
 // registerMiddlewares registers custom middlewares
 func (h *Hub) registerMiddlewares(se *core.ServeEvent) {
-	// authorizes request with user matching the provided email
-	authorizeRequestWithEmail := func(e *core.RequestEvent, email string) (err error) {
-		if e.Auth != nil || email == "" {
-			return e.Next()
+	se.Router.BindFunc(func(e *core.RequestEvent) error {
+		path := e.Request.URL.Path
+		if h.dashboardPasswordHash != "" && !h.isPublicRequest(e) && !hasDashboardSession(e.Request.Header.Get("Cookie"), h.dashboardPasswordHash) {
+			return e.UnauthorizedError("Dashboard password required", nil)
 		}
-		isAuthRefresh := e.Request.URL.Path == "/api/collections/users/auth-refresh" && e.Request.Method == http.MethodPost
-		e.Auth, err = e.App.FindAuthRecordByEmail("users", email)
-		if err != nil || !isAuthRefresh {
-			return e.Next()
+		if path == "/_" || strings.HasPrefix(path, "/_/") || isBlockedPocketBaseAPI(path) {
+			return e.NotFoundError("", nil)
 		}
-		// auth refresh endpoint, make sure token is set in header
-		token, _ := e.Auth.NewAuthToken()
-		e.Request.Header.Set("Authorization", token)
 		return e.Next()
+	})
+}
+
+func (h *Hub) isPublicRequest(e *core.RequestEvent) bool {
+	path := e.Request.URL.Path
+	if !strings.HasPrefix(path, "/api/") {
+		return true
 	}
-	// authenticate with trusted header
-	if autoLogin, _ := utils.GetEnv("AUTO_LOGIN"); autoLogin != "" {
-		se.Router.BindFunc(func(e *core.RequestEvent) error {
-			return authorizeRequestWithEmail(e, autoLogin)
-		})
+	return path == "/api/health" || path == "/api/picket/auth" || path == "/api/picket/agent-connect" || path == "/api/picket/agent-binary"
+}
+
+func hasDashboardSession(cookieHeader, passwordHash string) bool {
+	for _, cookie := range strings.Split(cookieHeader, ";") {
+		if strings.TrimSpace(cookie) == "picket_session="+passwordHash {
+			return true
+		}
 	}
-	// authenticate with trusted header
-	if trustedHeader, _ := utils.GetEnv("TRUSTED_AUTH_HEADER"); trustedHeader != "" {
-		se.Router.BindFunc(func(e *core.RequestEvent) error {
-			return authorizeRequestWithEmail(e, e.Request.Header.Get(trustedHeader))
-		})
+	return false
+}
+
+func isBlockedPocketBaseAPI(path string) bool {
+	for _, prefix := range []string{"/api/settings", "/api/logs", "/api/backups", "/api/crons"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
 	}
+	const collectionsPrefix = "/api/collections/"
+	if path == "/api/collections" {
+		return true
+	}
+	if !strings.HasPrefix(path, collectionsPrefix) {
+		return false
+	}
+	name := strings.SplitN(strings.TrimPrefix(path, collectionsPrefix), "/", 2)[0]
+	_, public := applicationCollections[name]
+	return !public
 }
 
 // registerApiRoutes registers custom API routes
 func (h *Hub) registerApiRoutes(se *core.ServeEvent) error {
-	// auth protected routes
-	apiAuth := se.Router.Group("/api/beszel")
-	apiAuth.Bind(apis.RequireAuth())
-	// auth optional routes
-	apiNoAuth := se.Router.Group("/api/beszel")
-
-	// create first user endpoint only needed if no users exist
-	if totalUsers, _ := se.App.CountRecords("users"); totalUsers == 0 {
-		apiNoAuth.POST("/create-user", h.um.CreateFirstUser)
-	}
-	// check if first time setup on login page
-	apiNoAuth.GET("/first-run", func(e *core.RequestEvent) error {
-		total, err := e.App.CountRecords("users")
-		return e.JSON(http.StatusOK, map[string]bool{"firstRun": err == nil && total == 0})
-	})
-	// get public key and version
-	apiAuth.GET("/info", h.getInfo)
-	apiAuth.GET("/getkey", h.getInfo) // deprecated - keep for compatibility w/ integrations
-	// check for updates
-	if optIn, _ := utils.GetEnv("CHECK_UPDATES"); optIn == "true" {
-		var updateInfo UpdateInfo
-		apiAuth.GET("/update", updateInfo.getUpdate)
-	}
+	api := se.Router.Group("/api/picket")
+	// get version
+	api.GET("/info", h.getInfo)
+	api.POST("/auth", h.authenticateDashboard)
+	api.POST("/systems", h.createSystem)
+	api.GET("/systems/{id}/install-script", h.getAgentInstallScript)
+	api.GET("/agent-binary", h.serveAgentBinary)
 	// send test notification
-	apiAuth.POST("/test-notification", h.SendTestNotification)
-	// heartbeat status and test
-	apiAuth.GET("/heartbeat-status", h.getHeartbeatStatus).BindFunc(requireAdminRole)
-	apiAuth.POST("/test-heartbeat", h.testHeartbeat).BindFunc(requireAdminRole)
-	// get config.yml content
-	apiAuth.GET("/config-yaml", config.GetYamlConfig).BindFunc(requireAdminRole)
+	api.POST("/test-notification", h.SendTestNotification)
 	// handle agent websocket connection
-	apiNoAuth.GET("/agent-connect", h.handleAgentConnect)
-	// get or create universal tokens
-	apiAuth.GET("/universal-token", h.getUniversalToken).BindFunc(excludeReadOnlyRole)
-	// update / delete user alerts
-	apiAuth.POST("/user-alerts", alerts.UpsertUserAlerts)
-	apiAuth.DELETE("/user-alerts", alerts.DeleteUserAlerts)
-	// refresh SMART devices for a system
-	apiAuth.POST("/smart/refresh", h.refreshSmartData).BindFunc(excludeReadOnlyRole)
-	// get systemd service details
-	apiAuth.GET("/systemd/info", h.getSystemdInfo)
+	api.GET("/agent-connect", h.handleAgentConnect)
+	api.POST("/alerts", alerts.UpsertAlerts)
+	api.DELETE("/alerts", alerts.DeleteAlerts)
+	api.GET("/notification-settings", h.getNotificationSettings)
+	api.PUT("/notification-settings", h.updateNotificationSettings)
 	// /containers routes
 	if enabled, _ := utils.GetEnv("CONTAINER_DETAILS"); enabled != "false" {
 		// get container logs
-		apiAuth.GET("/containers/logs", h.getContainerLogs)
+		api.GET("/containers/logs", h.getContainerLogs)
 		// get container info
-		apiAuth.GET("/containers/info", h.getContainerInfo)
+		api.GET("/containers/info", h.getContainerInfo)
 	}
 	return nil
 }
 
-// getInfo returns data needed by authenticated users, such as the public key and current version
-func (h *Hub) getInfo(e *core.RequestEvent) error {
-	type infoResponse struct {
-		Key         string `json:"key"`
-		Version     string `json:"v"`
-		CheckUpdate bool   `json:"cu"`
+func (h *Hub) authenticateDashboard(e *core.RequestEvent) error {
+	var input struct {
+		Password string `json:"password"`
 	}
-	info := infoResponse{
-		Key:     h.pubKey,
-		Version: beszel.Version,
+	if err := e.BindBody(&input); err != nil || h.dashboardPasswordHash == "" || subtle.ConstantTimeCompare([]byte(hashDashboardPassword(input.Password)), []byte(h.dashboardPasswordHash)) != 1 {
+		return e.UnauthorizedError("Invalid password", nil)
 	}
-	if optIn, _ := utils.GetEnv("CHECK_UPDATES"); optIn == "true" {
-		info.CheckUpdate = true
-	}
-	return e.JSON(http.StatusOK, info)
+	e.Response.Header().Set("Set-Cookie", "picket_session="+h.dashboardPasswordHash+"; Path=/; HttpOnly; SameSite=Strict")
+	return e.JSON(http.StatusOK, map[string]bool{"authenticated": true})
 }
 
-// getUpdate checks for the latest release on GitHub and returns update info if a newer version is available
-func (info *UpdateInfo) getUpdate(e *core.RequestEvent) error {
-	if time.Since(info.lastCheck) < 6*time.Hour {
-		return e.JSON(http.StatusOK, info)
+func (h *Hub) createSystem(e *core.RequestEvent) error {
+	var input struct {
+		Name string `json:"name"`
 	}
-	info.lastCheck = time.Now()
-	latestRelease, err := ghupdate.FetchLatestRelease(context.Background(), http.DefaultClient, "")
+	if err := e.BindBody(&input); err != nil || strings.TrimSpace(input.Name) == "" {
+		return e.BadRequestError("A system name is required", err)
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return e.InternalServerError("Unable to generate agent token", err)
+	}
+	collection, err := e.App.FindCachedCollectionByNameOrId("systems")
 	if err != nil {
-		return err
+		return e.InternalServerError("Systems collection is unavailable", err)
 	}
-	currentVersion, err := semver.Parse(strings.TrimPrefix(beszel.Version, "v"))
-	if err != nil {
-		return err
+	record := core.NewRecord(collection)
+	record.Set("name", strings.TrimSpace(input.Name))
+	record.Set("token", hex.EncodeToString(tokenBytes))
+	record.Set("status", "pending")
+	record.Set("info", map[string]any{})
+	if err := e.App.Save(record); err != nil {
+		return e.InternalServerError("Unable to create system", err)
 	}
-	latestVersion, err := semver.Parse(strings.TrimPrefix(latestRelease.Tag, "v"))
-	if err != nil {
-		return err
-	}
-	if latestVersion.GT(currentVersion) {
-		info.Version = strings.TrimPrefix(latestRelease.Tag, "v")
-		info.Url = latestRelease.Url
-	}
-	return e.JSON(http.StatusOK, info)
-}
-
-// GetUniversalToken handles the universal token API endpoint (create, read, delete)
-func (h *Hub) getUniversalToken(e *core.RequestEvent) error {
-	if e.Auth.IsSuperuser() {
-		return e.ForbiddenError("Superusers cannot use universal tokens", nil)
-	}
-
-	tokenMap := universalTokenMap.GetMap()
-	userID := e.Auth.Id
-	query := e.Request.URL.Query()
-	token := query.Get("token")
-	enable := query.Get("enable")
-	permanent := query.Get("permanent")
-
-	// helper for deleting any existing permanent token record for this user
-	deletePermanent := func() error {
-		rec, err := h.FindFirstRecordByFilter("universal_tokens", "user = {:user}", dbx.Params{"user": userID})
-		if err != nil {
-			return nil // no record
-		}
-		return h.Delete(rec)
-	}
-
-	// helper for upserting a permanent token record for this user
-	upsertPermanent := func(token string) error {
-		rec, err := h.FindFirstRecordByFilter("universal_tokens", "user = {:user}", dbx.Params{"user": userID})
-		if err == nil {
-			rec.Set("token", token)
-			return h.Save(rec)
-		}
-
-		col, err := h.FindCachedCollectionByNameOrId("universal_tokens")
-		if err != nil {
-			return err
-		}
-		newRec := core.NewRecord(col)
-		newRec.Set("user", userID)
-		newRec.Set("token", token)
-		return h.Save(newRec)
-	}
-
-	// Disable universal tokens (both ephemeral and permanent)
-	if enable == "0" {
-		tokenMap.RemovebyValue(userID)
-		_ = deletePermanent()
-		return e.JSON(http.StatusOK, map[string]any{"token": token, "active": false, "permanent": false})
-	}
-
-	// Enable universal token (ephemeral or permanent)
-	if enable == "1" {
-		if token == "" {
-			token = uuid.New().String()
-		}
-
-		if permanent == "1" {
-			// make token permanent (persist across restarts)
-			tokenMap.RemovebyValue(userID)
-			if err := upsertPermanent(token); err != nil {
-				return err
-			}
-			return e.JSON(http.StatusOK, map[string]any{"token": token, "active": true, "permanent": true})
-		}
-
-		// default: ephemeral mode (1 hour)
-		_ = deletePermanent()
-		tokenMap.Set(token, userID, time.Hour)
-		return e.JSON(http.StatusOK, map[string]any{"token": token, "active": true, "permanent": false})
-	}
-
-	// Read current state
-	// Prefer permanent token if it exists.
-	if rec, err := h.FindFirstRecordByFilter("universal_tokens", "user = {:user}", dbx.Params{"user": userID}); err == nil {
-		dbToken := rec.GetString("token")
-		// If no token was provided, or the caller is asking about their permanent token, return it.
-		if token == "" || token == dbToken {
-			return e.JSON(http.StatusOK, map[string]any{"token": dbToken, "active": true, "permanent": true})
-		}
-		// Token doesn't match their permanent token (avoid leaking other info)
-		return e.JSON(http.StatusOK, map[string]any{"token": token, "active": false, "permanent": false})
-	}
-
-	// No permanent token; fall back to ephemeral token map.
-	if token == "" {
-		// return existing token if it exists
-		if token, _, ok := tokenMap.GetByValue(userID); ok {
-			return e.JSON(http.StatusOK, map[string]any{"token": token, "active": true, "permanent": false})
-		}
-		// if no token is provided, generate a new one
-		token = uuid.New().String()
-	}
-
-	// Token is considered active only if it belongs to the current user.
-	activeUser, ok := tokenMap.GetOk(token)
-	active := ok && activeUser == userID
-	response := map[string]any{"token": token, "active": active, "permanent": false}
-	return e.JSON(http.StatusOK, response)
-}
-
-// getHeartbeatStatus returns current heartbeat configuration and whether it's enabled
-func (h *Hub) getHeartbeatStatus(e *core.RequestEvent) error {
-	if h.hb == nil {
-		return e.JSON(http.StatusOK, map[string]any{
-			"enabled": false,
-			"msg":     "Set HEARTBEAT_URL to enable outbound heartbeat monitoring",
-		})
-	}
-	cfg := h.hb.GetConfig()
 	return e.JSON(http.StatusOK, map[string]any{
-		"enabled":  true,
-		"url":      cfg.URL,
-		"interval": cfg.Interval,
-		"method":   cfg.Method,
+		"system": record,
+		"token":  record.GetString("token"),
 	})
 }
 
-// testHeartbeat triggers a single heartbeat ping and returns the result
-func (h *Hub) testHeartbeat(e *core.RequestEvent) error {
-	if h.hb == nil {
-		return e.JSON(http.StatusOK, map[string]any{
-			"err": "Heartbeat not configured. Set HEARTBEAT_URL environment variable.",
-		})
+func (h *Hub) getAgentInstallScript(e *core.RequestEvent) error {
+	record, err := e.App.FindRecordById("systems", e.Request.PathValue("id"))
+	if err != nil {
+		return e.NotFoundError("System not found", err)
 	}
-	if err := h.hb.Send(); err != nil {
-		return e.JSON(http.StatusOK, map[string]any{"err": err.Error()})
+	hubURL := strings.TrimSuffix(h.appURL, "/")
+	if hubURL == "" {
+		hubURL = "http://127.0.0.1:8090"
 	}
-	return e.JSON(http.StatusOK, map[string]any{"err": false})
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+[ "$(id -u)" -eq 0 ] || { echo "Run this installer as root or with sudo." >&2; exit 1; }
+HUB_URL=${HUB_URL:-%q}
+TOKEN=${TOKEN:-%q}
+AGENT_BIN=${AGENT_BIN:-/usr/local/bin/picket-agent}
+RUNNER=/usr/local/libexec/picket-agent-runner
+SERVICE_FILE=/etc/systemd/system/picket-agent.service
+mkdir -p /etc/picket /usr/local/libexec
+cat > /etc/picket/agent.env <<EOF
+HUB_URL=$HUB_URL
+TOKEN=$TOKEN
+EOF
+if ! command -v curl >/dev/null 2>&1; then echo "curl is required" >&2; exit 1; fi
+curl -fsSL "$HUB_URL/api/picket/agent-binary?token=$TOKEN" -o "$AGENT_BIN.tmp"
+chmod 0755 "$AGENT_BIN.tmp"
+mv "$AGENT_BIN.tmp" "$AGENT_BIN"
+cat > "$RUNNER" <<'EOF'
+#!/bin/sh
+set -eu
+. /etc/picket/agent.env
+BIN=/usr/local/bin/picket-agent
+URL="$HUB_URL/api/picket/agent-binary?token=$TOKEN"
+while :; do
+  curl -fsSL "$URL" -o "$BIN.next" && chmod 0755 "$BIN.next" && mv "$BIN.next" "$BIN"
+  "$BIN" &
+  child=$!
+  sleep 21600 &
+  timer=$!
+  while kill -0 "$child" 2>/dev/null; do
+    if ! kill -0 "$timer" 2>/dev/null; then kill "$child" 2>/dev/null || true; break; fi
+    sleep 5
+  done
+  kill "$timer" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+done
+EOF
+chmod 0755 "$RUNNER"
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Picket monitoring agent
+After=network-online.target
+Wants=network-online.target
+[Service]
+EnvironmentFile=/etc/picket/agent.env
+ExecStart=$RUNNER
+Restart=always
+RestartSec=5
+User=root
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now picket-agent.service
+echo "Picket agent installed and started."
+`, hubURL, record.GetString("token"))
+	e.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	return e.String(http.StatusOK, script)
+}
+
+func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {
+	token := e.Request.URL.Query().Get("token")
+	if token == "" {
+		return e.UnauthorizedError("Agent token required", nil)
+	}
+	if _, err := h.FindFirstRecordByFilter("systems", "token = {:token}", dbx.Params{"token": token}); err != nil {
+		return e.UnauthorizedError("Invalid agent token", nil)
+	}
+	path := os.Getenv("PICKET_AGENT_BINARY")
+	if path == "" {
+		return e.NotFoundError("Agent binary is not configured", nil)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return e.NotFoundError("Agent binary is unavailable", err)
+	}
+	e.Response.Header().Set("Content-Type", "application/octet-stream")
+	e.Response.Header().Set("Content-Disposition", "attachment; filename=picket-agent")
+	return e.Blob(http.StatusOK, "application/octet-stream", data)
+}
+
+// getInfo returns public hub information.
+func (h *Hub) getInfo(e *core.RequestEvent) error {
+	type infoResponse struct {
+		Version string `json:"v"`
+	}
+	info := infoResponse{
+		Version: beszel.Version,
+	}
+	return e.JSON(http.StatusOK, info)
+}
+
+func (h *Hub) getNotificationSettings(e *core.RequestEvent) error {
+	record, err := e.App.FindFirstRecordByFilter("notification_settings", "id = 'globalsettings1'")
+	if err != nil {
+		return e.InternalServerError("Notification settings are unavailable", err)
+	}
+	var settings alerts.NotificationSettings
+	if err := record.UnmarshalJSONField("settings", &settings); err != nil {
+		return e.InternalServerError("Invalid notification settings", err)
+	}
+	return e.JSON(http.StatusOK, settings)
+}
+
+func (h *Hub) updateNotificationSettings(e *core.RequestEvent) error {
+	var settings alerts.NotificationSettings
+	if err := e.BindBody(&settings); err != nil {
+		return e.BadRequestError("Invalid notification settings", err)
+	}
+	if (settings.TelegramBotToken == "") != (len(settings.TelegramUserIDs) == 0) {
+		return e.BadRequestError("Telegram bot token and allowed user IDs must be configured together", errors.New("incomplete Telegram settings"))
+	}
+	record, err := e.App.FindFirstRecordByFilter("notification_settings", "id = 'globalsettings1'")
+	if err != nil {
+		return e.InternalServerError("Notification settings are unavailable", err)
+	}
+	record.Set("settings", settings)
+	if err := e.App.Save(record); err != nil {
+		return e.InternalServerError("Unable to save notification settings", err)
+	}
+	return e.JSON(http.StatusOK, settings)
 }
 
 // containerRequestHandler handles both container logs and info requests
@@ -316,7 +280,7 @@ func (h *Hub) containerRequestHandler(e *core.RequestEvent, fetchFunc func(*syst
 	}
 
 	system, err := h.sm.GetSystem(systemID)
-	if err != nil || !system.HasUser(e.App, e.Auth) {
+	if err != nil {
 		return e.NotFoundError("", nil)
 	}
 
@@ -328,7 +292,7 @@ func (h *Hub) containerRequestHandler(e *core.RequestEvent, fetchFunc func(*syst
 	return e.JSON(http.StatusOK, map[string]string{responseKey: data})
 }
 
-// getContainerLogs handles GET /api/beszel/containers/logs requests
+// getContainerLogs handles GET /api/picket/containers/logs requests
 func (h *Hub) getContainerLogs(e *core.RequestEvent) error {
 	return h.containerRequestHandler(e, func(system *systems.System, containerID string) (string, error) {
 		return system.FetchContainerLogsFromAgent(containerID)
@@ -339,53 +303,4 @@ func (h *Hub) getContainerInfo(e *core.RequestEvent) error {
 	return h.containerRequestHandler(e, func(system *systems.System, containerID string) (string, error) {
 		return system.FetchContainerInfoFromAgent(containerID)
 	}, "info")
-}
-
-// getSystemdInfo handles GET /api/beszel/systemd/info requests
-func (h *Hub) getSystemdInfo(e *core.RequestEvent) error {
-	query := e.Request.URL.Query()
-	systemID := query.Get("system")
-	serviceName := query.Get("service")
-
-	if systemID == "" || serviceName == "" {
-		return e.BadRequestError("Invalid system or service parameter", nil)
-	}
-	system, err := h.sm.GetSystem(systemID)
-	if err != nil || !system.HasUser(e.App, e.Auth) {
-		return e.NotFoundError("", nil)
-	}
-	// verify service exists before fetching details
-	_, err = e.App.FindFirstRecordByFilter("systemd_services", "system = {:system} && name = {:name}", dbx.Params{
-		"system": systemID,
-		"name":   serviceName,
-	})
-	if err != nil {
-		return e.NotFoundError("", err)
-	}
-	details, err := system.FetchSystemdInfoFromAgent(serviceName)
-	if err != nil {
-		return e.InternalServerError("", err)
-	}
-	e.Response.Header().Set("Cache-Control", "public, max-age=60")
-	return e.JSON(http.StatusOK, map[string]any{"details": details})
-}
-
-// refreshSmartData handles POST /api/beszel/smart/refresh requests
-// Fetches fresh SMART data from the agent and updates the collection
-func (h *Hub) refreshSmartData(e *core.RequestEvent) error {
-	systemID := e.Request.URL.Query().Get("system")
-	if systemID == "" {
-		return e.BadRequestError("Invalid system parameter", nil)
-	}
-
-	system, err := h.sm.GetSystem(systemID)
-	if err != nil || !system.HasUser(e.App, e.Auth) {
-		return e.NotFoundError("", nil)
-	}
-
-	if err := system.FetchAndSaveSmartDevices(); err != nil {
-		return e.InternalServerError("", err)
-	}
-
-	return e.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

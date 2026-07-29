@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro"
+import { Trans } from "@/lib/english"
 import { useEffect, useMemo, useRef } from "react"
 import { $copyContent } from "@/lib/stores"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog"

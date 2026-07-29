@@ -181,13 +181,10 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 		return sum
 	}
 
-	// necessary because uint8 is not big enough for the sum
-	batterySum := 0
 	// accumulate per-core usage across records
 	var cpuCoresSums []uint64
 	// accumulate cpu breakdown [user, system, iowait, steal, idle]
 	var cpuBreakdownSums []float64
-	tempCount := float64(0)
 
 	// Accumulate totals
 	for i := range records {
@@ -227,8 +224,6 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 		for i := range stats.DiskIoStats {
 			sum.DiskIoStats[i] += stats.DiskIoStats[i]
 		}
-		batterySum += int(stats.Battery[0])
-		sum.Battery[1] = stats.Battery[1]
 
 		// accumulate per-core usage if present
 		if stats.CpuCoresUsage != nil {
@@ -265,17 +260,6 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 				sum.NetworkInterfaces[key][1] + value[1],
 				max(sum.NetworkInterfaces[key][2], value[2]),
 				max(sum.NetworkInterfaces[key][3], value[3]),
-			}
-		}
-
-		// Accumulate temperatures
-		if stats.Temperatures != nil {
-			if sum.Temperatures == nil {
-				sum.Temperatures = make(map[string]float64, len(stats.Temperatures))
-			}
-			tempCount++
-			for key, value := range stats.Temperatures {
-				sum.Temperatures[key] += value
 			}
 		}
 
@@ -363,7 +347,6 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 	sum.LoadAvg[2] = twoDecimals(sum.LoadAvg[2] / count)
 	sum.Bandwidth[0] = sum.Bandwidth[0] / uint64(count)
 	sum.Bandwidth[1] = sum.Bandwidth[1] / uint64(count)
-	sum.Battery[0] = uint8(batterySum / int(count))
 
 	// Average network interfaces
 	if sum.NetworkInterfaces != nil {
@@ -374,13 +357,6 @@ func AverageSystemStatsSlice(records []system.Stats) system.Stats {
 				sum.NetworkInterfaces[key][2],
 				sum.NetworkInterfaces[key][3],
 			}
-		}
-	}
-
-	// Average temperatures
-	if sum.Temperatures != nil && tempCount > 0 {
-		for key := range sum.Temperatures {
-			sum.Temperatures[key] = twoDecimals(sum.Temperatures[key] / tempCount)
 		}
 	}
 

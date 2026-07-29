@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import type { ChartData } from "@/types"
 import { ChartCard } from "../chart-card"
 import LineChartDefault from "@/components/charts/line-chart"

@@ -1,0 +1,14 @@
+[Unit]
+Description=Picket monitoring agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/picket/agent.env
+ExecStart=/usr/local/libexec/picket-agent-runner
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

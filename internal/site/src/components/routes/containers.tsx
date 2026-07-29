@@ -1,14 +1,13 @@
-import { useLingui } from "@lingui/react/macro"
+import { useLingui } from "@/lib/english"
 import { memo, useEffect, useMemo } from "react"
 import ContainersTable from "@/components/containers-table/containers-table"
 import { ActiveAlerts } from "@/components/active-alerts"
-import { FooterRepoLink } from "@/components/footer-repo-link"
 
 export default memo(() => {
 	const { t } = useLingui()
 
 	useEffect(() => {
-		document.title = `${t`All Containers`} / Beszel`
+		document.title = `${t`All Containers`} / Picket`
 	}, [t])
 
 	return useMemo(
@@ -18,7 +17,6 @@ export default memo(() => {
 					<ActiveAlerts />
 					<ContainersTable />
 				</div>
-				<FooterRepoLink />
 			</>
 		),
 		[]

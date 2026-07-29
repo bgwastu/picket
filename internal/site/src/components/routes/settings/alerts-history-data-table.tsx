@@ -1,5 +1,4 @@
-import { t } from "@lingui/core/macro"
-import { Trans } from "@lingui/react/macro"
+import { t, Trans } from "@/lib/english"
 import {
 	type ColumnFiltersState,
 	flexRender,

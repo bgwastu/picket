@@ -1,239 +1,73 @@
-import { t } from "@lingui/core/macro"
-import { Trans } from "@lingui/react/macro"
-import { BellIcon, LoaderCircleIcon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react"
-import { type ChangeEventHandler, useEffect, useState } from "react"
+import type { ClientResponseError } from "pocketbase"
+import { useStore } from "@nanostores/react"
+import { BellIcon, LoaderCircleIcon, SaveIcon } from "lucide-react"
+import { useEffect, useState } from "react"
 import * as v from "valibot"
-import { prependBasePath } from "@/components/router"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { InputTags } from "@/components/ui/input-tags"
 import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
 import { toast } from "@/components/ui/use-toast"
-import { isAdmin, pb } from "@/lib/api"
-import type { UserSettings } from "@/types"
-import { saveSettings } from "./layout"
-import { QuietHours } from "./quiet-hours"
-import type { ClientResponseError } from "pocketbase"
+import { pb } from "@/lib/api"
+import { alertInfo } from "@/lib/alerts"
+import { $alerts, $systems } from "@/lib/stores"
+import type { NotificationSettings } from "@/types"
+import { AlertContent } from "@/components/alerts/alerts-sheet"
 
-interface ShoutrrrUrlCardProps {
-	url: string
-	onUrlChange: ChangeEventHandler<HTMLInputElement>
-	onRemove: () => void
-}
+const schema = v.object({ telegramBotToken: v.string(), telegramUserIds: v.array(v.string()) })
+const endpoint = "/api/picket/notification-settings"
 
-const NotificationSchema = v.object({
-	emails: v.array(v.pipe(v.string(), v.rfcEmail())),
-	webhooks: v.array(v.pipe(v.string(), v.url())),
-})
+export default function Notifications() {
+	const [settings, setSettings] = useState<NotificationSettings>({ telegramBotToken: "", telegramUserIds: [] })
+	const [loading, setLoading] = useState(true)
+	const [overwriteExisting, setOverwriteExisting] = useState(false)
+	const systems = useStore($systems)
+	const alerts = useStore($alerts)
 
-const SettingsNotificationsPage = ({ userSettings }: { userSettings: UserSettings }) => {
-	const [webhooks, setWebhooks] = useState(userSettings.webhooks ?? [])
-	const [emails, setEmails] = useState<string[]>(userSettings.emails ?? [])
-	const [isLoading, setIsLoading] = useState(false)
-
-	// update values when userSettings changes
 	useEffect(() => {
-		setWebhooks(userSettings.webhooks ?? [])
-		setEmails(userSettings.emails ?? [])
-	}, [userSettings])
+		pb.send<Partial<NotificationSettings>>(endpoint, {}).then((next) => setSettings({
+			telegramBotToken: next.telegramBotToken ?? "",
+			telegramUserIds: Array.isArray(next.telegramUserIds) ? next.telegramUserIds : [],
+		})).catch((error) => {
+			console.error(error); toast({ title: "Unable to load notification settings", variant: "destructive" })
+		}).finally(() => setLoading(false))
+	}, [])
 
-	function addWebhook() {
-		setWebhooks([...webhooks, ""])
-		// focus on the new input
-		queueMicrotask(() => {
-			const inputs = document.querySelectorAll("#webhooks input") as NodeListOf<HTMLInputElement>
-			inputs[inputs.length - 1]?.focus()
-		})
-	}
-	const removeWebhook = (index: number) => setWebhooks(webhooks.filter((_, i) => i !== index))
-
-	function updateWebhook(index: number, value: string) {
-		const newWebhooks = [...webhooks]
-		newWebhooks[index] = value
-		setWebhooks(newWebhooks)
-	}
-
-	async function updateSettings() {
-		setIsLoading(true)
+	async function save() {
+		setLoading(true)
 		try {
-			const parsedData = v.parse(NotificationSchema, { emails, webhooks })
-			await saveSettings(parsedData)
-		} catch (e: unknown) {
-			toast({
-				title: t`Failed to save settings`,
-				description: (e as Error).message,
-				variant: "destructive",
-			})
-		}
-		setIsLoading(false)
+			const parsed = v.parse(schema, settings)
+			setSettings(await pb.send<NotificationSettings>(endpoint, { method: "PUT", body: parsed }))
+			toast({ title: "Telegram notification settings saved" })
+		} catch (error) {
+			toast({ title: "Unable to save notification settings", description: (error as Error).message, variant: "destructive" })
+		} finally { setLoading(false) }
 	}
 
 	return (
-		<div>
-			<div>
-				<h3 className="text-xl font-medium mb-2">
-					<Trans>Notifications</Trans>
-				</h3>
-				<p className="text-sm text-muted-foreground leading-relaxed">
-					<Trans>Configure how you receive alert notifications.</Trans>
-				</p>
-				<p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-					<Trans>
-						Looking instead for where to create alerts? Click the bell <BellIcon className="inline h-4 w-4" /> icons in
-						the systems table.
-					</Trans>
-				</p>
-			</div>
-			<Separator className="my-4" />
-			<div className="space-y-5">
-				<div className="grid gap-2">
-					<div className="mb-2">
-						<h3 className="mb-1 text-lg font-medium">
-							<Trans>Email notifications</Trans>
-						</h3>
-						{isAdmin() && (
-							<p className="text-sm text-muted-foreground leading-relaxed">
-								<Trans>
-									Please{" "}
-									<a href={prependBasePath("/_/#/settings/mail")} className="link" target="_blank">
-										configure an SMTP server
-									</a>{" "}
-									to ensure alerts are delivered.
-								</Trans>
-							</p>
-						)}
+		<div className="space-y-5">
+			<p className="text-sm text-muted-foreground"><BellIcon className="inline size-4 me-1" />Configure Telegram delivery for alerts created from the bell buttons in the systems table. Leave both fields blank to disable Telegram.</p>
+			<div className="grid gap-2"><Label htmlFor="telegram-bot-token">Telegram bot token</Label><Input id="telegram-bot-token" type="password" value={settings.telegramBotToken} onChange={(event) => setSettings({ ...settings, telegramBotToken: event.target.value })} placeholder="123456:ABC..." /></div>
+			<div className="grid gap-2"><Label htmlFor="telegram-user-ids">Allowed Telegram user IDs</Label><InputTags id="telegram-user-ids" value={settings.telegramUserIds} onChange={(telegramUserIds) => setSettings({ ...settings, telegramUserIds })} placeholder="Enter a user ID..." /><p className="text-xs text-muted-foreground">Press Enter or comma after each ID. Alerts are sent only to these users.</p></div>
+			<div className="flex flex-wrap gap-2"><Button className="gap-2" onClick={save} disabled={loading}>{loading ? <LoaderCircleIcon className="size-4 animate-spin" /> : <SaveIcon className="size-4" />}<span>Save Telegram Settings</span></Button><Button variant="outline" onClick={test} disabled={loading || !settings.telegramBotToken || !settings.telegramUserIds.length}>Send Test</Button></div>
+			<div className="border-t pt-6 space-y-4">
+				<div><h3 className="text-lg font-medium">Global system alerts</h3><p className="text-sm text-muted-foreground">Configure one alert policy for all connected systems.</p></div>
+				{systems.length === 0 ? <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">No systems connected.</p> : <>
+					<label htmlFor="global-alert-overwrite" className="flex cursor-pointer items-center gap-2 rounded-md border border-destructive px-4 py-3 text-sm font-semibold text-destructive">
+						<Checkbox id="global-alert-overwrite" checked={overwriteExisting} onCheckedChange={(checked) => setOverwriteExisting(checked === true)} className="text-destructive border-destructive data-[state=checked]:bg-destructive" />
+						Overwrite existing system alert settings
+					</label>
+					<div className="grid gap-3">
+						{Object.keys(alertInfo).map((name) => <AlertContent key={name} alertKey={name} data={alertInfo[name as keyof typeof alertInfo]} system={systems[0]} global overwriteExisting={overwriteExisting} initialAlertsState={alerts} idPrefix="settings-global" />)}
 					</div>
-					<Label className="block" htmlFor="email">
-						<Trans>To email(s)</Trans>
-					</Label>
-					<InputTags
-						value={emails}
-						onChange={setEmails}
-						placeholder={t`Enter email address...`}
-						className="w-full"
-						type="email"
-						id="email"
-					/>
-					<p className="text-[0.8rem] text-muted-foreground">
-						<Trans>Save address using enter key or comma. Leave blank to disable email notifications.</Trans>
-					</p>
-				</div>
-				<Separator />
-				<div className="space-y-3">
-					<div className="grid grid-cols-1 sm:flex items-center justify-between gap-4">
-						<div>
-							<h3 className="mb-1 text-lg font-medium">
-								<Trans>Webhook / Push notifications</Trans>
-							</h3>
-							<p className="text-sm text-muted-foreground leading-relaxed">
-								<Trans>
-									Beszel uses{" "}
-									<a href="https://beszel.dev/guide/notifications" target="_blank" className="link" rel="noopener">
-										Shoutrrr
-									</a>{" "}
-									to integrate with popular notification services.
-								</Trans>
-							</p>
-						</div>
-						<Button type="button" variant="outline" className="h-10 shrink-0" onClick={addWebhook}>
-							<PlusIcon className="size-4" />
-							<span className="ms-1">
-								<Trans>Add URL</Trans>
-							</span>
-						</Button>
-					</div>
-					{webhooks.length > 0 && (
-						<div className="grid gap-2.5" id="webhooks">
-							{webhooks.map((webhook, index) => (
-								<ShoutrrrUrlCard
-									key={index}
-									url={webhook}
-									onUrlChange={(e: React.ChangeEvent<HTMLInputElement>) => updateWebhook(index, e.target.value)}
-									onRemove={() => removeWebhook(index)}
-								/>
-							))}
-						</div>
-					)}
-				</div>
-				<Separator />
-				<div className="space-y-3">
-					<QuietHours />
-				</div>
-				<Separator />
-				<Button
-					type="button"
-					className="flex items-center gap-1.5 disabled:opacity-100"
-					onClick={updateSettings}
-					disabled={isLoading}
-				>
-					{isLoading ? <LoaderCircleIcon className="h-4 w-4 animate-spin" /> : <SaveIcon className="h-4 w-4" />}
-					<Trans>Save Settings</Trans>
-				</Button>
+				</>}
 			</div>
 		</div>
 	)
 }
 
-function showTestNotificationError(msg: string) {
-	toast({
-		title: t`Error`,
-		description: msg ?? t`Failed to send test notification`,
-		variant: "destructive",
-	})
+async function test() {
+	try { await pb.send("/api/picket/test-notification", { method: "POST" }); toast({ title: "Telegram test sent" }) }
+	catch (error) { toast({ title: "Telegram test failed", description: (error as ClientResponseError).data?.message, variant: "destructive" }) }
 }
-
-const ShoutrrrUrlCard = ({ url, onUrlChange, onRemove }: ShoutrrrUrlCardProps) => {
-	const [isLoading, setIsLoading] = useState(false)
-
-	const sendTestNotification = async () => {
-		setIsLoading(true)
-		try {
-			const res = await pb.send("/api/beszel/test-notification", { method: "POST", body: { url } })
-			if ("err" in res && !res.err) {
-				toast({
-					title: t`Test notification sent`,
-					description: t`Check your notification service`,
-				})
-			} else {
-				showTestNotificationError(res.err)
-			}
-		} catch (e: unknown) {
-			showTestNotificationError((e as ClientResponseError).data?.message)
-		} finally {
-			setIsLoading(false)
-		}
-	}
-
-	return (
-		<Card className="bg-table-header p-2 md:p-3">
-			<div className="flex items-center gap-1">
-				<Input
-					type="url"
-					className="light:bg-card"
-					required
-					placeholder="generic://webhook.site/xxxxxx"
-					value={url}
-					onChange={onUrlChange}
-				/>
-				<Button type="button" variant="outline" disabled={isLoading || url === ""} onClick={sendTestNotification}>
-					{isLoading ? (
-						<LoaderCircleIcon className="h-4 w-4 animate-spin" />
-					) : (
-						<span>
-							<Trans>
-								Test <span className="hidden sm:inline">URL</span>
-							</Trans>
-						</span>
-					)}
-				</Button>
-				<Button type="button" variant="outline" size="icon" className="shrink-0" aria-label="Delete" onClick={onRemove}>
-					<Trash2Icon className="h-4 w-4" />
-				</Button>
-			</div>
-		</Card>
-	)
-}
-
-export default SettingsNotificationsPage

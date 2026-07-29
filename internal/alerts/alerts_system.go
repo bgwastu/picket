@@ -45,12 +45,6 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 				}
 			}
 			val = maxUsedPct
-		case "Temperature":
-			if data.Info.DashboardTemp < 1 {
-				continue
-			}
-			val = data.Info.DashboardTemp
-			unit = "°C"
 		case "LoadAvg1":
 			val = data.Info.LoadAvg[0]
 			unit = ""
@@ -62,17 +56,11 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 			unit = ""
 		case "GPU":
 			val = data.Info.GpuPct
-		case "Battery":
-			if data.Stats.Battery[0] == 0 {
-				continue
-			}
-			val = float64(data.Stats.Battery[0])
 		}
 
 		triggered := alertData.Triggered
 		threshold := alertData.Value
 
-		// Battery alert has inverted logic: trigger when value is BELOW threshold
 		lowAlert := isLowAlert(name)
 
 		// CONTINUE
@@ -207,16 +195,6 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 						alert.mapSums[key] += float32(fs.DiskUsed / fs.DiskTotal * 100)
 					}
 				}
-			case "Temperature":
-				if alert.mapSums == nil {
-					alert.mapSums = make(map[string]float32, len(stats.Temperatures))
-				}
-				for key, temp := range stats.Temperatures {
-					if _, ok := alert.mapSums[key]; !ok {
-						alert.mapSums[key] = float32(0)
-					}
-					alert.mapSums[key] += temp
-				}
 			case "LoadAvg1":
 				alert.val += stats.LoadAvg[0]
 			case "LoadAvg5":
@@ -234,8 +212,6 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 					}
 				}
 				alert.val += maxUsage
-			case "Battery":
-				alert.val += float64(stats.Battery[0])
 			default:
 				continue
 			}
@@ -255,16 +231,6 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 				}
 			}
 			alert.val = float64(maxPct / float32(alert.count))
-		case "Temperature":
-			maxTemp := float32(0)
-			for key, value := range alert.mapSums {
-				sumTemp := float32(value) / float32(alert.count)
-				if sumTemp > maxTemp {
-					maxTemp = sumTemp
-					alert.descriptor = fmt.Sprintf("Highest sensor %s", key)
-				}
-			}
-			alert.val = float64(maxTemp)
 		default:
 			alert.val = alert.val / float64(alert.count)
 		}
@@ -273,7 +239,6 @@ func (am *AlertManager) HandleSystemAlerts(systemRecord *core.Record, data *syst
 		// log.Printf("%s: val %f | count %d | min-count %f | threshold %f\n", alert.name, alert.val, alert.count, minCount, alert.threshold)
 		// pass through alert if count is greater than or equal to minCount
 		if float32(alert.count) >= minCount {
-			// Battery alert has inverted logic: trigger when value is BELOW threshold
 			lowAlert := isLowAlert(alert.name)
 			if lowAlert {
 				if !alert.triggered && alert.val < alert.threshold {
@@ -345,7 +310,6 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 		return
 	}
 	am.SendAlert(AlertMessageData{
-		UserID:   alert.alertData.UserID,
 		SystemID: alert.systemRecord.Id,
 		Title:    subject,
 		Message:  body,
@@ -355,5 +319,5 @@ func (am *AlertManager) sendSystemAlert(alert SystemAlertData) {
 }
 
 func isLowAlert(name string) bool {
-	return name == "Battery"
+	return false
 }

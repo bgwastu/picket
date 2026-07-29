@@ -10,13 +10,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// The hub integration tests create/replace systems and cleanup the test apps quickly.
-// Background SMART fetching can outlive teardown and crash in PocketBase internals (nil DB).
-//
-// We keep the explicit SMART refresh endpoint / method available, but disable
-// the automatic background fetch during tests.
-func backgroundSmartFetchEnabled() bool { return false }
-
 // TESTING ONLY: GetSystemCount returns the number of systems in the store
 func (sm *SystemManager) GetSystemCount() int {
 	return sm.systems.Length()
@@ -114,7 +107,6 @@ func (sm *SystemManager) RemoveAllSystems() {
 	for _, system := range sm.systems.GetAll() {
 		sm.RemoveSystem(system.Id)
 	}
-	sm.smartFetchMap.StopCleaner()
 }
 
 func (s *System) StopUpdater() {

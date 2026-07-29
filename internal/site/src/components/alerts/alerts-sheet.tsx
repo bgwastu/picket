@@ -1,5 +1,4 @@
-import { t } from "@lingui/core/macro"
-import { Plural, Trans } from "@lingui/react/macro"
+import { Plural, t, Trans } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { getPagePath } from "@nanostores/router"
 import { ChevronDownIcon, GlobeIcon, ServerIcon } from "lucide-react"
@@ -21,7 +20,7 @@ import type { AlertInfo, AlertRecord, SystemRecord } from "@/types"
 
 const Slider = lazy(() => import("@/components/ui/slider"))
 
-const endpoint = "/api/beszel/user-alerts"
+const endpoint = "/api/picket/alerts"
 
 const alertDebounce = 400
 
@@ -132,9 +131,9 @@ export const AlertDialogContent = memo(function AlertDialogContent({ system }: {
 				</DialogTitle>
 				<DialogDescription>
 					<Trans>
-						See{" "}
-						<Link href={getPagePath($router, "settings", { name: "notifications" })} className="link">
-							notification settings
+							See{" "}
+							<Link href={getPagePath($router, "settings", { name: "notifications" })} className="link">
+								Telegram settings
 						</Link>{" "}
 						to configure how you receive alerts.
 					</Trans>
@@ -179,6 +178,7 @@ export const AlertDialogContent = memo(function AlertDialogContent({ system }: {
 								data={alertInfo[name as keyof typeof alertInfo]}
 								alert={systemAlerts.get(name)}
 								system={system}
+								idPrefix={`sidebar-${system.id}`}
 							/>
 						))}
 					</div>
@@ -207,6 +207,7 @@ export const AlertDialogContent = memo(function AlertDialogContent({ system }: {
 								global={true}
 								overwriteExisting={!!overwriteExisting}
 								initialAlertsState={alertsWhenGlobalSelected}
+								idPrefix="sidebar-global"
 							/>
 						))}
 					</div>
@@ -224,6 +225,7 @@ export function AlertContent({
 	global = false,
 	overwriteExisting = false,
 	initialAlertsState = {},
+	idPrefix = "alert",
 }: {
 	alertKey: string
 	data: AlertInfo
@@ -232,6 +234,7 @@ export function AlertContent({
 	global?: boolean
 	overwriteExisting?: boolean
 	initialAlertsState?: Record<string, Map<string, AlertRecord>>
+	idPrefix?: string
 }) {
 	const { name } = alertData
 
@@ -242,6 +245,7 @@ export function AlertContent({
 	const [value, setValue] = useState(alert?.value || (singleDescription ? 0 : (alertData.start ?? 80)))
 
 	const Icon = alertData.icon
+	const controlId = `${idPrefix}-${alertKey}`
 
 	/** Get system ids to update */
 	function getSystemIds(): string[] {
@@ -275,7 +279,7 @@ export function AlertContent({
 	return (
 		<div className="rounded-lg border border-muted-foreground/15 hover:border-muted-foreground/20 transition-colors duration-100 group">
 			<label
-				htmlFor={`s${name}`}
+				htmlFor={`s${controlId}`}
 				className={cn("flex flex-row items-center justify-between gap-4 cursor-pointer p-4", {
 					"pb-0": checked,
 				})}
@@ -287,7 +291,7 @@ export function AlertContent({
 					{!checked && <span className="block text-sm text-muted-foreground">{alertData.desc()}</span>}
 				</div>
 				<Switch
-					id={`s${name}`}
+					id={`s${controlId}`}
 					checked={checked}
 					onCheckedChange={(newChecked) => {
 						setChecked(newChecked)
@@ -312,7 +316,7 @@ export function AlertContent({
 					<Suspense fallback={<div className="h-10" />}>
 						{!singleDescription && (
 							<div>
-								<p id={`v${name}`} className="text-sm block h-6">
+								<p id={`v${controlId}`} className="text-sm block h-6">
 									{alertData.invert ? (
 										<Trans>
 											Average drops below{" "}
@@ -333,7 +337,7 @@ export function AlertContent({
 								</p>
 								<div className="flex gap-3 items-center">
 									<Slider
-										aria-labelledby={`v${name}`}
+										aria-labelledby={`v${controlId}`}
 										value={[value]}
 										onValueCommit={(val) => sendUpsert(min, val[0])}
 										onValueChange={(val) => setValue(val[0])}
@@ -362,7 +366,7 @@ export function AlertContent({
 							</div>
 						)}
 						<div className={cn(singleDescription && "col-span-full lowercase")}>
-							<p id={`t${name}`} className="text-sm block h-6 first-letter:uppercase">
+								<p id={`t${controlId}`} className="text-sm block h-6 first-letter:uppercase">
 								{singleDescription && (
 									<>
 										{singleDescription}
@@ -376,7 +380,7 @@ export function AlertContent({
 							</p>
 							<div className="flex gap-3 items-center">
 								<Slider
-									aria-labelledby={`t${name}`}
+									aria-labelledby={`t${controlId}`}
 									value={[min]}
 									onValueCommit={(val) => sendUpsert(val[0], value)}
 									onValueChange={(val) => setMin(val[0])}

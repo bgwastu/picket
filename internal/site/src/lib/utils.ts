@@ -1,4 +1,4 @@
-import { plural, t } from "@lingui/core/macro"
+import { plural, t } from "@/lib/english"
 import { type ClassValue, clsx } from "clsx"
 import { listenKeys } from "nanostores"
 import { timeDay, timeHour, timeMinute } from "d3-time"
@@ -7,7 +7,7 @@ import { twMerge } from "tailwind-merge"
 import { toast } from "@/components/ui/use-toast"
 import type { ChartTimeData, FingerprintRecord, SemVer, SystemRecord } from "@/types"
 import { HourFormat, Unit } from "./enums"
-import { $copyContent, $userSettings } from "./stores"
+import { $copyContent, $displaySettings } from "./stores"
 
 export function cn(...inputs: ClassValue[]) {
 	return twMerge(clsx(inputs))
@@ -77,7 +77,7 @@ export const hourWithSeconds = (timestamp: string) => {
 }
 
 // Update the time formatters if user changes hourFormat
-listenKeys($userSettings, ["hourFormat"], ({ hourFormat }) => {
+listenKeys($displaySettings, ["hourFormat"], ({ hourFormat }) => {
 	if (!hourFormat) return
 	const newHour12 = hourFormat === HourFormat["12h"]
 	if (currentHour12() !== newHour12) {
@@ -103,14 +103,9 @@ export const updateFavicon = (() => {
 		}
 		prevDownCount = downCount
 		const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 70">
-  <defs>
-    <linearGradient id="gradient" x1="0%" y1="20%" x2="100%" y2="120%">
-      <stop offset="0%" style="stop-color:#747bff"/>
-      <stop offset="100%" style="stop-color:#24eb5c"/>
-    </linearGradient>
-  </defs>
-  <path fill="url(#gradient)" d="M35 70H0V0h35q4.4 0 8.2 1.7a21.4 21.4 0 0 1 6.6 4.5q2.9 2.8 4.5 6.6Q56 16.7 56 21a15.4 15.4 0 0 1-.3 3.2 17.6 17.6 0 0 1-.2.8 19.4 19.4 0 0 1-1.5 4 17 17 0 0 1-2.4 3.4 13.5 13.5 0 0 1-2.6 2.3 12.5 12.5 0 0 1-.4.3q1.7 1 3 2.5Q53 39.1 54 41a18.3 18.3 0 0 1 1.5 4 17.4 17.4 0 0 1 .5 3 15.3 15.3 0 0 1 0 1q0 4.4-1.7 8.2a21.4 21.4 0 0 1-4.5 6.6q-2.8 2.9-6.6 4.6Q39.4 70 35 70ZM14 14v14h21a7 7 0 0 0 2.3-.3 6.6 6.6 0 0 0 .4-.2Q39 27 40 26a6.9 6.9 0 0 0 1.5-2.2q.5-1.3.5-2.8a7 7 0 0 0-.4-2.3 6.6 6.6 0 0 0-.1-.4Q40.9 17 40 16a7 7 0 0 0-2.3-1.4 6.9 6.9 0 0 0-2.5-.6 7.9 7.9 0 0 0-.2 0H14Zm0 28v14h21a7 7 0 0 0 2.3-.4 6.6 6.6 0 0 0 .4-.1Q39 54.9 40 54a7 7 0 0 0 1.5-2.2 6.9 6.9 0 0 0 .5-2.6 7.9 7.9 0 0 0 0-.2 7 7 0 0 0-.4-2.3 6.6 6.6 0 0 0-.1-.4Q40.9 45 40 44a7 7 0 0 0-2.3-1.5 6.9 6.9 0 0 0-2.5-.6 7.9 7.9 0 0 0-.2 0H14Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28">
+  <rect width="28" height="28" rx="6" fill="#18181b"/>
+  <path fill="white" d="M6 4h8c4.7 0 7.3 2.7 7.3 6.7s-2.6 6.7-7.3 6.7H10V24H6V4Zm4 3.4v6.6h4c2 0 3.3-1.2 3.3-3.3S16 7.4 14 7.4h-4Z"/>
   ${downCount > 0 &&
 			`
 		<circle cx="40" cy="50" r="22" fill="#f00"/>
@@ -217,24 +212,6 @@ export function useBrowserStorage<T>(key: string, defaultValue: T, storageInterf
 	return [value, setValue]
 }
 
-/** Format temperature to user's preferred unit */
-export function formatTemperature(celsius: number, unit?: Unit): { value: number; unit: string } {
-	if (!unit) {
-		unit = $userSettings.get().unitTemp || Unit.Celsius
-	}
-	// biome-ignore lint/suspicious/noDoubleEquals: need loose equality check due to form data being strings
-	if (unit == Unit.Fahrenheit) {
-		return {
-			value: celsius * 1.8 + 32,
-			unit: "°F",
-		}
-	}
-	return {
-		value: celsius,
-		unit: "°C",
-	}
-}
-
 /** Format bytes to user's preferred unit */
 export function formatBytes(
 	size: number,
@@ -291,10 +268,13 @@ export const chartMargin = { top: 12, right: 5 }
 /**
  * Retuns value of system host, truncating full path if socket.
  * @example
- * // Assuming system.host is "/var/run/beszel.sock"
- * const hostname = getHostDisplayValue(system) // hostname will be "beszel.sock"
+ * // Assuming system.host is "/var/run/picket.sock"
+ * const hostname = getHostDisplayValue(system) // hostname will be "picket.sock"
  */
-export const getHostDisplayValue = (system: SystemRecord): string => system.host.slice(system.host.lastIndexOf("/") + 1)
+export const getHostDisplayValue = (system: SystemRecord): string => {
+	const host = system.host ?? system.name ?? ""
+	return host.slice(host.lastIndexOf("/") + 1)
+}
 
 // export function formatUptimeString(uptimeSeconds: number): string {
 // 	if (!uptimeSeconds || isNaN(uptimeSeconds)) return ""
@@ -320,8 +300,8 @@ export const generateToken = () => {
 	}
 }
 
-/** Get the hub URL from the global BESZEL object */
-export const getHubURL = () => globalThis.BESZEL?.HUB_URL || window.location.origin
+/** Get the hub URL supplied by Picket or use the current origin. */
+export const getHubURL = () => globalThis.PICKET?.HUB_URL || window.location.origin
 
 /** Map of system IDs to their corresponding tokens (used to avoid fetching in add-system dialog) */
 export const tokenMap = new Map<SystemRecord["id"], FingerprintRecord["token"]>()
@@ -464,7 +444,7 @@ export function secondsToString(seconds: number, unit: "hour" | "minute" | "day"
 export function secondsToUptimeString(seconds: number): string {
 	if (seconds < 3600) {
 		return secondsToString(seconds, "minute")
-	} else if (seconds < 360000) {
+	} else if (seconds < 86400) {
 		return secondsToString(seconds, "hour")
 	} else {
 		return secondsToString(seconds, "day")

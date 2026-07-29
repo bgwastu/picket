@@ -1,5 +1,4 @@
-import { plural } from "@lingui/core/macro"
-import { Trans, useLingui } from "@lingui/react/macro"
+import { plural, Trans, useLingui } from "@/lib/english"
 import {
 	AppleIcon,
 	ChevronRightSquareIcon,
@@ -7,16 +6,18 @@ import {
 	CpuIcon,
 	GlobeIcon,
 	MemoryStickIcon,
+	MoreHorizontalIcon,
 	MonitorIcon,
 	Settings2Icon,
 } from "lucide-react"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import ChartTimeSelect from "@/components/charts/chart-time-select"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
@@ -29,6 +30,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ConnectionType, connectionTypeLabels, Os, SystemStatus } from "@/lib/enums"
 import { cn, formatBytes, getHostDisplayValue, secondsToUptimeString, toFixedFloat } from "@/lib/utils"
 import type { ChartData, SystemDetailsRecord, SystemRecord } from "@/types"
+import { SystemDialog } from "@/components/add-system"
+import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { InputCopy } from "@/components/ui/input-copy"
+import { pb } from "@/lib/api"
+import { navigate } from "@/components/router"
 
 export default function InfoBar({
 	system,
@@ -48,6 +54,23 @@ export default function InfoBar({
 	details: SystemDetailsRecord | null
 }) {
 	const { t } = useLingui()
+	const [editOpen, setEditOpen] = useState(false)
+	const [installScript, setInstallScript] = useState("")
+	const [installOpen, setInstallOpen] = useState(false)
+	const [deleteOpen, setDeleteOpen] = useState(false)
+
+	async function loadInstallScript() {
+		const response = await fetch(`/api/picket/systems/${system.id}/install-script`, { credentials: "same-origin" })
+		if (!response.ok) throw new Error("Unable to load install script")
+		const script = await response.text()
+		setInstallScript(script)
+		setInstallOpen(true)
+	}
+
+	async function deleteSystem() {
+		await pb.collection("systems").delete(system.id)
+		navigate("/")
+	}
 
 	// values for system info bar - use details with fallback to system.info
 	const systemInfo = useMemo(() => {
@@ -95,8 +118,8 @@ export default function InfoBar({
 				value: hostname,
 				Icon: MonitorIcon,
 				label: "Hostname",
-				// hide if hostname is same as host or name
-				hide: hostname === system.host || hostname === system.name,
+				// hide if hostname is the same as the system name
+				hide: hostname === system.name,
 			},
 			{ value: secondsToUptimeString(system.info.u), Icon: ClockArrowUp, label: t`Uptime`, hide: !system.info.u },
 			osInfo[os],
@@ -249,8 +272,36 @@ export default function InfoBar({
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
+					<DropdownMenu>
+						<DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Agent actions"><MoreHorizontalIcon className="size-4" /></Button></DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuLabel>Agent</DropdownMenuLabel>
+							<DropdownMenuItem onSelect={() => setEditOpen(true)}>Rename agent</DropdownMenuItem>
+							<DropdownMenuItem onSelect={() => void loadInstallScript()}>Show install script</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem className="text-destructive" onSelect={() => setDeleteOpen(true)}>Delete agent</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 				</div>
 			</div>
+			<Dialog open={editOpen} onOpenChange={setEditOpen}><SystemDialog setOpen={setEditOpen} system={system} /></Dialog>
+			<Dialog open={installOpen} onOpenChange={setInstallOpen}>
+				<DialogContent className="w-[92%] sm:max-w-2xl rounded-lg">
+					<div className="space-y-4">
+						<div><h2 className="text-lg font-semibold">Install this agent</h2><p className="text-sm text-muted-foreground">Run this script as root or with sudo on the Linux host.</p></div>
+						<textarea className="min-h-72 w-full rounded-md border bg-muted p-3 font-mono text-xs" readOnly value={installScript} aria-label="Agent install script" />
+						<div className="flex justify-end gap-2"><InputCopy value={installScript} /><Button variant="outline" onClick={() => setInstallOpen(false)}>Close</Button></div>
+					</div>
+				</DialogContent>
+			</Dialog>
+			<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+				<DialogContent className="w-[92%] sm:max-w-md rounded-lg">
+					<div className="space-y-4">
+						<div><h2 className="text-lg font-semibold">Delete {system.name}?</h2><p className="text-sm text-muted-foreground">This removes the agent and its collected data.</p></div>
+						<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button><Button variant="destructive" onClick={deleteSystem}>Delete</Button></div>
+					</div>
+				</DialogContent>
+			</Dialog>
 		</Card>
 	)
 }

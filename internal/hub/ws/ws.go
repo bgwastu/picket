@@ -2,12 +2,8 @@ package ws
 
 import (
 	"context"
-	"errors"
 	"time"
 	"weak"
-
-	"github.com/blang/semver"
-	"github.com/henrygd/beszel"
 
 	"github.com/henrygd/beszel/internal/common"
 
@@ -29,15 +25,6 @@ type WsConn struct {
 	conn           *gws.Conn
 	requestManager *RequestManager
 	DownChan       chan struct{}
-	agentVersion   semver.Version
-}
-
-// FingerprintRecord is fingerprints collection record data in the hub
-type FingerprintRecord struct {
-	Id          string `db:"id"`
-	SystemId    string `db:"system"`
-	Fingerprint string `db:"fingerprint"`
-	Token       string `db:"token"`
 }
 
 var upgrader *gws.Upgrader
@@ -52,13 +39,12 @@ func GetUpgrader() *gws.Upgrader {
 	return upgrader
 }
 
-// NewWsConnection creates a new WebSocket connection wrapper with agent version.
-func NewWsConnection(conn *gws.Conn, agentVersion semver.Version) *WsConn {
+// NewWsConnection creates a new WebSocket connection wrapper.
+func NewWsConnection(conn *gws.Conn) *WsConn {
 	return &WsConn{
 		conn:           conn,
 		requestManager: NewRequestManager(conn),
 		DownChan:       make(chan struct{}, 1),
-		agentVersion:   agentVersion,
 	}
 }
 
@@ -131,44 +117,9 @@ func (ws *WsConn) sendMessage(data common.HubRequest[any]) error {
 	return ws.conn.WriteMessage(gws.OpcodeBinary, bytes)
 }
 
-// handleAgentRequest processes a request to the agent, handling both legacy and new formats.
-func (ws *WsConn) handleAgentRequest(req *PendingRequest, handler ResponseHandler) error {
-	// Wait for response
-	select {
-	case message := <-req.ResponseCh:
-		defer message.Close()
-		// Cancel request context to stop timeout watcher promptly
-		defer req.Cancel()
-		data := message.Data.Bytes()
-
-		// Legacy format - unmarshal directly
-		if ws.agentVersion.LT(beszel.MinVersionAgentResponse) {
-			return handler.HandleLegacy(data)
-		}
-
-		// New format with AgentResponse wrapper
-		var agentResponse common.AgentResponse
-		if err := cbor.Unmarshal(data, &agentResponse); err != nil {
-			return err
-		}
-		if agentResponse.Error != "" {
-			return errors.New(agentResponse.Error)
-		}
-		return handler.Handle(agentResponse)
-
-	case <-req.Context.Done():
-		return req.Context.Err()
-	}
-}
-
 // IsConnected returns true if the WebSocket connection is active.
 func (ws *WsConn) IsConnected() bool {
 	return ws.conn != nil
-}
-
-// AgentVersion returns the connected agent's version (as reported during handshake).
-func (ws *WsConn) AgentVersion() semver.Version {
-	return ws.agentVersion
 }
 
 // SendRequest sends a request to the agent and returns a pending request handle.

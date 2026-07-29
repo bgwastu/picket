@@ -3,18 +3,15 @@ import { createRouter } from "@nanostores/router"
 const routes = {
 	home: "/",
 	containers: "/containers",
-	smart: "/smart",
 	system: `/system/:id`,
 	settings: `/settings/:name?`,
-	forgot_password: `/forgot-password`,
-	request_otp: `/request-otp`,
 } as const
 
 /**
  * The base path of the application.
  * This is used to prepend the base path to all routes.
  */
-export const basePath = BESZEL?.BASE_PATH || ""
+export const basePath = PICKET?.BASE_PATH || ""
 
 /**
  * Prepends the base path to the given path.

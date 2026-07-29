@@ -1,10 +1,7 @@
 import "./index.css"
-import { i18n } from "@lingui/core"
-import { I18nProvider } from "@lingui/react"
 import { useStore } from "@nanostores/react"
-import { DirectionProvider } from "@radix-ui/react-direction"
 // import { Suspense, lazy, useEffect, StrictMode } from "react"
-import { lazy, memo, Suspense, useEffect } from "react"
+import { lazy, memo, Suspense, useEffect, useState } from "react"
 import ReactDOM from "react-dom/client"
 import Navbar from "@/components/navbar.tsx"
 import { $router } from "@/components/router.tsx"
@@ -12,45 +9,24 @@ import Settings from "@/components/routes/settings/layout.tsx"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { Toaster } from "@/components/ui/toaster.tsx"
 import { alertManager } from "@/lib/alerts"
-import { isAdmin, pb, updateUserSettings } from "@/lib/api.ts"
-import { dynamicActivate, getLocale } from "@/lib/i18n"
-import {
-	$authenticated,
-	$copyContent,
-	$direction,
-	$newVersion,
-	$publicKey,
-	$userSettings,
-	defaultLayoutWidth,
-} from "@/lib/stores.ts"
+import { pb } from "@/lib/api.ts"
+import { $copyContent, defaultLayoutWidth } from "@/lib/stores.ts"
 import * as systemsManager from "@/lib/systemsManager.ts"
-import type { BeszelInfo, UpdateInfo } from "./types"
+import Login from "@/components/login"
 
-const LoginPage = lazy(() => import("@/components/login/login.tsx"))
 const Home = lazy(() => import("@/components/routes/home.tsx"))
 const Containers = lazy(() => import("@/components/routes/containers.tsx"))
-const Smart = lazy(() => import("@/components/routes/smart.tsx"))
 const SystemDetail = lazy(() => import("@/components/routes/system.tsx"))
 const CopyToClipboardDialog = lazy(() => import("@/components/copy-to-clipboard.tsx"))
+
+function isUnauthorized(error: unknown) {
+	return (error as { status?: number })?.status === 401
+}
 
 const App = memo(() => {
 	const page = useStore($router)
 
 	useEffect(() => {
-		// change auth store on auth change
-		const unsubscribeAuth = pb.authStore.onChange(() => {
-			$authenticated.set(pb.authStore.isValid)
-		})
-		// get general info for authenticated users, such as public key and version
-		pb.send<BeszelInfo>("/api/beszel/info", {}).then((data) => {
-			$publicKey.set(data.key)
-			// check for updates if enabled
-			if (data.cu && isAdmin()) {
-				pb.send<UpdateInfo>("/api/beszel/update", {}).then($newVersion.set)
-			}
-		})
-		// get user settings
-		updateUserSettings()
 		// need to get system list before alerts
 		systemsManager.init()
 		systemsManager
@@ -63,7 +39,6 @@ const App = memo(() => {
 			// subscribe to new alert updates
 			.then(alertManager.subscribe)
 		return () => {
-			unsubscribeAuth()
 			alertManager.unsubscribe()
 			systemsManager.unsubscribe()
 		}
@@ -77,31 +52,26 @@ const App = memo(() => {
 		return <SystemDetail id={page.params.id} />
 	} else if (page.route === "containers") {
 		return <Containers />
-	} else if (page.route === "smart") {
-		return <Smart />
 	} else if (page.route === "settings") {
 		return <Settings />
 	}
 })
 
 const Layout = () => {
-	const authenticated = useStore($authenticated)
 	const copyContent = useStore($copyContent)
-	const direction = useStore($direction)
-	const { layoutWidth } = useStore($userSettings, { keys: ["layoutWidth"] })
+	const [authenticated, setAuthenticated] = useState<boolean | null>(null)
 
 	useEffect(() => {
-		document.documentElement.dir = direction
-	}, [direction])
+		fetch(`${window.location.origin}/api/collections/systems/records?perPage=1`, { credentials: "include" })
+			.then((response) => setAuthenticated(response.ok || !isUnauthorized({ status: response.status })))
+			.catch(() => setAuthenticated(true))
+	}, [])
+
+	if (authenticated === false) return <Login onAuthenticated={() => setAuthenticated(true)} />
+	if (authenticated === null) return null
 
 	return (
-		<DirectionProvider dir={direction}>
-			{!authenticated ? (
-				<Suspense>
-					<LoginPage />
-				</Suspense>
-			) : (
-				<div style={{ "--container": `${layoutWidth ?? defaultLayoutWidth}px` } as React.CSSProperties}>
+		<div style={{ "--container": `${defaultLayoutWidth}px` } as React.CSSProperties}>
 					<div className="container">
 						<Navbar />
 					</div>
@@ -113,24 +83,7 @@ const Layout = () => {
 							</Suspense>
 						)}
 					</div>
-				</div>
-			)}
-		</DirectionProvider>
-	)
-}
-
-const I18nApp = () => {
-	useEffect(() => {
-		dynamicActivate(getLocale())
-	}, [])
-
-	return (
-		<I18nProvider i18n={i18n}>
-			<ThemeProvider>
-				<Layout />
-				<Toaster />
-			</ThemeProvider>
-		</I18nProvider>
+		</div>
 	)
 }
 
@@ -138,6 +91,9 @@ ReactDOM.createRoot(document.getElementById("app") as HTMLElement).render(
 	// strict mode in dev mounts / unmounts components twice
 	// and breaks the clipboard dialog
 	//<StrictMode>
-	<I18nApp />
+	<ThemeProvider>
+		<Layout />
+		<Toaster />
+	</ThemeProvider>
 	//</StrictMode>
 )

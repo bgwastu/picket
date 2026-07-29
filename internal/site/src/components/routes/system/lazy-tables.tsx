@@ -12,25 +12,3 @@ export function LazyContainersTable({ systemId }: { systemId: string }) {
 		</div>
 	)
 }
-
-const SmartTable = lazy(() => import("./smart-table"))
-
-export function LazySmartTable({ systemId }: { systemId: string }) {
-	const { isIntersecting, ref } = useIntersectionObserver({ rootMargin: "90px" })
-	return (
-		<div ref={ref} className={cn(isIntersecting && "contents")}>
-			{isIntersecting && <SmartTable systemId={systemId} />}
-		</div>
-	)
-}
-
-const SystemdTable = lazy(() => import("../../systemd-table/systemd-table"))
-
-export function LazySystemdTable({ systemId }: { systemId: string }) {
-	const { isIntersecting, ref } = useIntersectionObserver()
-	return (
-		<div ref={ref} className={cn(isIntersecting && "contents")}>
-			{isIntersecting && <SystemdTable systemId={systemId} />}
-		</div>
-	)
-}

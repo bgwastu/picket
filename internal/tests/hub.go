@@ -63,40 +63,6 @@ func NewTestHubWithConfig(config core.BaseAppConfig) (*TestHub, error) {
 	return t, nil
 }
 
-// Helper function to create a test user for config tests
-func CreateUser(app core.App, email string, password string) (*core.Record, error) {
-	userCollection, err := app.FindCachedCollectionByNameOrId("users")
-	if err != nil {
-		return nil, err
-	}
-
-	user := core.NewRecord(userCollection)
-	user.Set("email", email)
-	user.Set("password", password)
-
-	return user, app.Save(user)
-}
-
-// Helper function to create a test superuser for config tests
-func CreateSuperuser(app core.App, email string, password string) (*core.Record, error) {
-	superusersCollection, _ := app.FindCachedCollectionByNameOrId(core.CollectionNameSuperusers)
-	superuser := core.NewRecord(superusersCollection)
-	superuser.Set("email", email)
-	superuser.Set("password", password)
-
-	return superuser, app.Save(superuser)
-}
-
-func CreateUserWithRole(app core.App, email string, password string, roleName string) (*core.Record, error) {
-	user, err := CreateUser(app, email, password)
-	if err != nil {
-		return nil, err
-	}
-
-	user.Set("role", roleName)
-	return user, app.Save(user)
-}
-
 // Helper function to create a test record
 func CreateRecord(app core.App, collectionName string, fields map[string]any) (*core.Record, error) {
 	collection, err := app.FindCachedCollectionByNameOrId(collectionName)
@@ -123,14 +89,12 @@ func (h *TestHub) Cleanup() {
 	h.TestApp.Cleanup()
 }
 
-func CreateSystems(app core.App, count int, userId string, status string) ([]*core.Record, error) {
+func CreateSystems(app core.App, count int, _ string, status string) ([]*core.Record, error) {
 	systems := make([]*core.Record, 0, count)
 	for i := range count {
 		system, err := CreateRecord(app, "systems", map[string]any{
 			"name":  fmt.Sprintf("test-system-%d", i),
-			"host":  fmt.Sprintf("127.0.0.%d", i),
-			"port":  "33914",
-			"users": []string{userId},
+			"token": fmt.Sprintf("test-token-%d-012345678901234567890123456789", i),
 		})
 		if err != nil {
 			return nil, err
@@ -145,7 +109,7 @@ func CreateSystems(app core.App, count int, userId string, status string) ([]*co
 	return systems, nil
 }
 
-// GetHubWithUser creates a test hub with a test user and user settings
+// GetHubWithUser retains the old helper shape while creating a global notification record.
 func GetHubWithUser(t *testing.T) (*TestHub, *core.Record) {
 	hub, err := NewTestHub(t.TempDir())
 	assert.NoError(t, err)
@@ -155,17 +119,12 @@ func GetHubWithUser(t *testing.T) (*TestHub, *core.Record) {
 	err = hub.GetSystemManager().Initialize()
 	assert.NoError(t, err)
 
-	// Create a test user
-	user, err := CreateUser(hub, "test@example.com", "password")
-	assert.NoError(t, err)
-
-	// Create user settings for the test user (required for alert notifications)
-	userSettingsData := map[string]any{
-		"user":     user.Id,
-		"settings": `{"emails":[test@example.com],"webhooks":[]}`,
+	settingsData := map[string]any{
+		"id":       "globalsettings1",
+		"settings": `{"emails":["test@example.com"],"webhooks":[]}`,
 	}
-	_, err = CreateRecord(hub, "user_settings", userSettingsData)
+	_, err = CreateRecord(hub, "notification_settings", settingsData)
 	assert.NoError(t, err)
 
-	return hub, user
+	return hub, core.NewRecord(core.NewBaseCollection("test", "test"))
 }

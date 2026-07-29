@@ -3,21 +3,12 @@ package systems
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/henrygd/beszel/internal/hub/ws"
 
 	"github.com/henrygd/beszel/internal/entities/system"
-	"github.com/henrygd/beszel/internal/hub/expirymap"
-
-	"github.com/henrygd/beszel/internal/common"
-
-	"github.com/henrygd/beszel"
-
-	"github.com/blang/semver"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/store"
-	"golang.org/x/crypto/ssh"
 )
 
 // System status constants
@@ -31,27 +22,22 @@ const (
 	interval int = 60_000
 	// interval int = 10_000 // Debug interval for faster updates
 
-	// sessionTimeout is the maximum time to wait for SSH connections
-	sessionTimeout = 4 * time.Second
 )
 
 // errSystemExists is returned when attempting to add a system that already exists
 var errSystemExists = errors.New("system exists")
 
 // SystemManager manages a collection of monitored systems and their connections.
-// It handles system lifecycle, status updates, and maintains both SSH and WebSocket connections.
+// It handles system lifecycle, status updates, and outbound WebSocket connections.
 type SystemManager struct {
-	hub           hubLike                               // Hub interface for database and alert operations
-	systems       *store.Store[string, *System]         // Thread-safe store of active systems
-	sshConfig     *ssh.ClientConfig                     // SSH client configuration for system connections
-	smartFetchMap *expirymap.ExpiryMap[smartFetchState] // Stores last SMART fetch time/result; TTL is only for cleanup
+	hub     hubLike                       // Hub interface for database and alert operations
+	systems *store.Store[string, *System] // Thread-safe store of active systems
 }
 
 // hubLike defines the interface requirements for the hub dependency.
 // It extends core.App with system-specific functionality.
 type hubLike interface {
 	core.App
-	GetSSHKey(dataDir string) (ssh.Signer, error)
 	HandleSystemAlerts(systemRecord *core.Record, data *system.CombinedData) error
 	HandleStatusAlerts(status string, systemRecord *core.Record) error
 	CancelPendingStatusAlerts(systemID string)
@@ -61,9 +47,8 @@ type hubLike interface {
 // The hub must implement the hubLike interface to provide database and alert functionality.
 func NewSystemManager(hub hubLike) *SystemManager {
 	return &SystemManager{
-		systems:       store.New(map[string]*System{}),
-		hub:           hub,
-		smartFetchMap: expirymap.New[smartFetchState](time.Hour),
+		systems: store.New(map[string]*System{}),
+		hub:     hub,
 	}
 }
 
@@ -76,41 +61,13 @@ func (sm *SystemManager) GetSystem(systemID string) (*System, error) {
 	return sys, nil
 }
 
-// Initialize sets up the system manager by binding event hooks and starting existing systems.
-// It configures SSH client settings and begins monitoring all non-paused systems from the database.
-// Systems are started with staggered delays to prevent overwhelming the hub during startup.
+// Initialize binds lifecycle hooks. Agents add themselves after authenticating.
 func (sm *SystemManager) Initialize() error {
 	sm.bindEventHooks()
-
-	// Initialize SSH client configuration
-	err := sm.createSSHClientConfig()
-	if err != nil {
-		return err
-	}
-
-	// Load existing systems from database (excluding paused ones)
-	var systems []*System
-	err = sm.hub.DB().NewQuery("SELECT id, host, port, status FROM systems WHERE status != 'paused'").All(&systems)
-	if err != nil || len(systems) == 0 {
-		return err
-	}
-
-	// Start systems in background with staggered timing
-	go func() {
-		// Calculate staggered delay between system starts (max 2 seconds per system)
-		delta := interval / max(1, len(systems))
-		delta = min(delta, 2_000)
-		sleepTime := time.Duration(delta) * time.Millisecond
-
-		for _, system := range systems {
-			time.Sleep(sleepTime)
-			_ = sm.AddSystem(system)
-		}
-	}()
 	return nil
 }
 
-// bindEventHooks registers event handlers for system and fingerprint record changes.
+// bindEventHooks registers event handlers for system record changes.
 // These hooks ensure the system manager stays synchronized with database changes.
 func (sm *SystemManager) bindEventHooks() {
 	sm.hub.OnRecordCreate("systems").BindFunc(sm.onRecordCreate)
@@ -118,27 +75,8 @@ func (sm *SystemManager) bindEventHooks() {
 	sm.hub.OnRecordUpdate("systems").BindFunc(sm.onRecordUpdate)
 	sm.hub.OnRecordAfterUpdateSuccess("systems").BindFunc(sm.onRecordAfterUpdateSuccess)
 	sm.hub.OnRecordAfterDeleteSuccess("systems").BindFunc(sm.onRecordAfterDeleteSuccess)
-	sm.hub.OnRecordAfterUpdateSuccess("fingerprints").BindFunc(sm.onTokenRotated)
 	sm.hub.OnRealtimeSubscribeRequest().BindFunc(sm.onRealtimeSubscribeRequest)
 	sm.hub.OnRealtimeConnectRequest().BindFunc(sm.onRealtimeConnectRequest)
-}
-
-// onTokenRotated handles fingerprint token rotation events.
-// When a system's authentication token is rotated, any existing WebSocket connection
-// must be closed to force re-authentication with the new token.
-func (sm *SystemManager) onTokenRotated(e *core.RecordEvent) error {
-	systemID := e.Record.GetString("system")
-	system, ok := sm.systems.GetOk(systemID)
-	if !ok {
-		return e.Next()
-	}
-	// No need to close connection if not connected via websocket
-	if system.WsConn == nil {
-		return e.Next()
-	}
-	system.setDown(nil)
-	sm.RemoveSystem(systemID)
-	return e.Next()
 }
 
 // onRecordCreate is called before a new system record is committed to the database.
@@ -149,12 +87,8 @@ func (sm *SystemManager) onRecordCreate(e *core.RecordEvent) error {
 	return e.Next()
 }
 
-// onRecordAfterCreateSuccess is called after a new system record is successfully created.
-// It adds the new system to the manager to begin monitoring.
+// onRecordAfterCreateSuccess leaves the system pending until its agent connects.
 func (sm *SystemManager) onRecordAfterCreateSuccess(e *core.RecordEvent) error {
-	if err := sm.AddRecord(e.Record, nil); err != nil {
-		e.App.Logger().Error("Error adding record", "err", err)
-	}
 	return e.Next()
 }
 
@@ -170,7 +104,7 @@ func (sm *SystemManager) onRecordUpdate(e *core.RecordEvent) error {
 // onRecordAfterUpdateSuccess handles system record updates after they're committed to the database.
 // It manages system lifecycle based on status changes and triggers appropriate alerts.
 // Status transitions are handled as follows:
-// - paused: Closes SSH connection and deactivates alerts
+// - paused: Closes the WebSocket connection and deactivates alerts
 // - pending: Starts monitoring (reuses WebSocket if available)
 // - up: Triggers system alerts
 // - down: Triggers status change alerts
@@ -181,13 +115,17 @@ func (sm *SystemManager) onRecordAfterUpdateSuccess(e *core.RecordEvent) error {
 	if ok {
 		prevStatus = system.Status
 		system.Status = newStatus
+		if e.Record.GetString("token") != e.Record.Original().GetString("token") {
+			_ = system.setDown(nil)
+			_ = sm.RemoveSystem(e.Record.Id)
+			return e.Next()
+		}
 	}
 
 	switch newStatus {
 	case paused:
 		if ok {
-			// Pause monitoring but keep system in manager for potential resume
-			system.closeSSHConnection()
+			system.closeWebSocketConnection()
 		}
 		_ = deactivateAlerts(e.App, e.Record.Id)
 		sm.hub.CancelPendingStatusAlerts(e.Record.Id)
@@ -197,10 +135,6 @@ func (sm *SystemManager) onRecordAfterUpdateSuccess(e *core.RecordEvent) error {
 		if ok && system.WsConn != nil {
 			go system.update()
 			return e.Next()
-		}
-		// Start new monitoring session
-		if err := sm.AddRecord(e.Record, nil); err != nil {
-			e.App.Logger().Error("Error adding record", "err", err)
 		}
 		_ = deactivateAlerts(e.App, e.Record.Id)
 		return e.Next()
@@ -241,7 +175,7 @@ func (sm *SystemManager) AddSystem(sys *System) error {
 	if sm.systems.Has(sys.Id) {
 		return errSystemExists
 	}
-	if sys.Id == "" || sys.Host == "" {
+	if sys.Id == "" || sys.WsConn == nil {
 		return errors.New("system missing required fields")
 	}
 
@@ -270,8 +204,6 @@ func (sm *SystemManager) RemoveSystem(systemID string) error {
 		system.cancel()
 	}
 
-	// Clean up all connections
-	system.closeSSHConnection()
 	system.closeWebSocketConnection()
 	sm.systems.Remove(systemID)
 	return nil
@@ -303,52 +235,16 @@ func (sm *SystemManager) AddRecord(record *core.Record, system *System) (err err
 // AddWebSocketSystem creates and adds a system with an established WebSocket connection.
 // This method is called when an agent connects via WebSocket with valid authentication.
 // The system is immediately added to monitoring with the provided connection and version info.
-func (sm *SystemManager) AddWebSocketSystem(systemId string, agentVersion semver.Version, wsConn *ws.WsConn) error {
+func (sm *SystemManager) AddWebSocketSystem(systemId string, wsConn *ws.WsConn) error {
 	systemRecord, err := sm.hub.FindRecordById("systems", systemId)
 	if err != nil {
 		return err
 	}
-	sm.resetFailedSmartFetchState(systemId)
-
 	system := sm.NewSystem(systemId)
 	system.WsConn = wsConn
-	system.agentVersion = agentVersion
 
 	if err := sm.AddRecord(systemRecord, system); err != nil {
 		return err
-	}
-	return nil
-}
-
-// resetFailedSmartFetchState clears only failed SMART cooldown entries so a fresh
-// agent reconnect retries SMART discovery immediately after configuration changes.
-func (sm *SystemManager) resetFailedSmartFetchState(systemID string) {
-	state, ok := sm.smartFetchMap.GetOk(systemID)
-	if ok && !state.Successful {
-		sm.smartFetchMap.Remove(systemID)
-	}
-}
-
-// createSSHClientConfig initializes the SSH client configuration for connecting to an agent's server
-func (sm *SystemManager) createSSHClientConfig() error {
-	privateKey, err := sm.hub.GetSSHKey("")
-	if err != nil {
-		return err
-	}
-
-	sm.sshConfig = &ssh.ClientConfig{
-		User: "u",
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(privateKey),
-		},
-		Config: ssh.Config{
-			Ciphers:      common.DefaultCiphers,
-			KeyExchanges: common.DefaultKeyExchanges,
-			MACs:         common.DefaultMACs,
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		ClientVersion:   fmt.Sprintf("SSH-2.0-%s_%s", beszel.AppName, beszel.Version),
-		Timeout:         sessionTimeout,
 	}
 	return nil
 }

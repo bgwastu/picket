@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { MoreHorizontalIcon } from "lucide-react"
 import { memo, useRef, useState } from "react"
@@ -8,7 +8,7 @@ import { useNetworkInterfaces } from "@/components/charts/hooks"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { DialogTitle } from "@/components/ui/dialog"
-import { $userSettings } from "@/lib/stores"
+import { $displaySettings } from "@/lib/stores"
 import { decimalString, formatBytes, toFixedFloat } from "@/lib/utils"
 import type { ChartData } from "@/types"
 import { ChartCard } from "./chart-card"
@@ -25,7 +25,7 @@ export default memo(function NetworkSheet({
 	maxValues: boolean
 }) {
 	const [netInterfacesOpen, setNetInterfacesOpen] = useState(false)
-	const userSettings = useStore($userSettings)
+	const userSettings = useStore($displaySettings)
 	const netInterfaces = useNetworkInterfaces(chartData.systemStats.at(-1)?.stats?.ni ?? {})
 	const showNetLegend = netInterfaces.length > 0 && netInterfaces.length < 15
 	const hasOpened = useRef(false)

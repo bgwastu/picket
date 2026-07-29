@@ -10,10 +10,9 @@ import {
 	$allSystemsByName,
 	$chartTime,
 	$containerFilter,
-	$direction,
 	$maxValues,
 	$systems,
-	$userSettings,
+	$displaySettings,
 } from "@/lib/stores"
 import { chartTimeData, listen, parseSemVer, useBrowserStorage } from "@/lib/utils"
 import type {
@@ -31,7 +30,7 @@ import { appendData, cache, getStats, getTimeData, makeContainerData, makeContai
 export type SystemData = ReturnType<typeof useSystemData>
 
 export function useSystemData(id: string) {
-	const direction = useStore($direction)
+	const direction = "ltr" as const
 	const systems = useStore($systems)
 	const chartTime = useStore($chartTime)
 	const maxValues = useStore($maxValues)
@@ -56,7 +55,7 @@ export function useSystemData(id: string) {
 	useEffect(() => {
 		return () => {
 			if (!persistChartTime.current) {
-				$chartTime.set($userSettings.get().chartTime)
+				$chartTime.set($displaySettings.get().chartTime)
 			}
 			persistChartTime.current = false
 			setSystemStats([])
@@ -69,15 +68,19 @@ export function useSystemData(id: string) {
 	// find matching system and update when it changes
 	useEffect(() => {
 		if (!systems.length) {
+			pb.collection<SystemRecord>("systems").getOne(id, { fields: "id,name,info,status" }).then(setSystem).catch(() => {})
 			return
 		}
 		// allow old system-name slug to work
 		const store = $allSystemsById.get()[id] ? $allSystemsById : $allSystemsByName
+		const current = store.get()[id]
+		if (current) setSystem(current)
+		else pb.collection<SystemRecord>("systems").getOne(id, { fields: "id,name,info,status" }).then(setSystem).catch(() => {})
 		return subscribeKeys(store, [id], (newSystems) => {
 			const sys = newSystems[id]
 			if (sys) {
 				setSystem(sys)
-				document.title = `${sys?.name} / Beszel`
+				document.title = `${sys?.name} / Picket`
 			}
 		})
 	}, [id, systems.length])

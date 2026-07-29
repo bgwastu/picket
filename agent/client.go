@@ -3,9 +3,7 @@ package agent
 import (
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,13 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/henrygd/beszel"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/common"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/lxzan/gws"
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
 )
 
@@ -36,10 +32,8 @@ type WebSocketClient struct {
 	Conn               *gws.Conn                           // Active WebSocket connection
 	hubURL             *url.URL                            // Parsed hub URL for connection
 	token              string                              // Authentication token for hub registration
-	fingerprint        string                              // System fingerprint for identification
 	hubRequest         *common.HubRequest[cbor.RawMessage] // Reusable request structure for message parsing
 	lastConnectAttempt time.Time                           // Timestamp of last connection attempt
-	hubVerified        bool                                // Whether the hub has been cryptographically verified
 }
 
 // newWebSocketClient creates a new WebSocket client for the given agent.
@@ -64,8 +58,6 @@ func newWebSocketClient(agent *Agent) (client *WebSocketClient, err error) {
 
 	client.agent = agent
 	client.hubRequest = &common.HubRequest[cbor.RawMessage]{}
-	client.fingerprint = agent.getFingerprint()
-
 	return client, nil
 }
 
@@ -103,20 +95,13 @@ func (client *WebSocketClient) getOptions() *gws.ClientOption {
 	} else {
 		client.hubURL.Scheme = "ws"
 	}
-	client.hubURL.Path = path.Join(client.hubURL.Path, "api/beszel/agent-connect")
-
-	// make sure BESZEL_AGENT_ALL_PROXY works (GWS only checks ALL_PROXY)
-	if val := os.Getenv("BESZEL_AGENT_ALL_PROXY"); val != "" {
-		os.Setenv("ALL_PROXY", val)
-	}
+	client.hubURL.Path = path.Join(client.hubURL.Path, "api/picket/agent-connect")
 
 	client.options = &gws.ClientOption{
 		Addr:      client.hubURL.String(),
 		TlsConfig: &tls.Config{InsecureSkipVerify: true},
 		RequestHeader: http.Header{
-			"User-Agent": []string{getUserAgent()},
-			"X-Token":    []string{client.token},
-			"X-Beszel":   []string{beszel.Version},
+			"Authorization": []string{"Bearer " + client.token},
 		},
 		NewDialer: func() (gws.Dialer, error) {
 			return proxy.FromEnvironment(), nil
@@ -147,6 +132,7 @@ func (client *WebSocketClient) Connect() (err error) {
 // It sets a deadline for the connection to prevent hanging.
 func (client *WebSocketClient) OnOpen(conn *gws.Conn) {
 	conn.SetDeadline(time.Now().Add(wsDeadline))
+	client.agent.connectionManager.eventChan <- WebSocketConnect
 }
 
 // OnClose handles WebSocket connection closure.
@@ -188,48 +174,6 @@ func (client *WebSocketClient) OnPing(conn *gws.Conn, message []byte) {
 	conn.WritePong(message)
 }
 
-// handleAuthChallenge verifies the authenticity of the hub and returns the system's fingerprint.
-func (client *WebSocketClient) handleAuthChallenge(msg *common.HubRequest[cbor.RawMessage], requestID *uint32) (err error) {
-	var authRequest common.FingerprintRequest
-	if err := cbor.Unmarshal(msg.Data, &authRequest); err != nil {
-		return err
-	}
-
-	if err := client.verifySignature(authRequest.Signature); err != nil {
-		return err
-	}
-
-	client.hubVerified = true
-	client.agent.connectionManager.eventChan <- WebSocketConnect
-
-	response := &common.FingerprintResponse{
-		Fingerprint: client.fingerprint,
-	}
-
-	if authRequest.NeedSysInfo {
-		response.Name, _ = utils.GetEnv("SYSTEM_NAME")
-		response.Hostname = client.agent.systemDetails.Hostname
-		serverAddr := client.agent.connectionManager.serverOptions.Addr
-		_, response.Port, _ = net.SplitHostPort(serverAddr)
-	}
-
-	return client.sendResponse(response, requestID)
-}
-
-// verifySignature verifies the signature of the token using the public keys.
-func (client *WebSocketClient) verifySignature(signature []byte) (err error) {
-	for _, pubKey := range client.agent.keys {
-		sig := ssh.Signature{
-			Format: pubKey.Type(),
-			Blob:   signature,
-		}
-		if err = pubKey.Verify([]byte(client.token), &sig); err == nil {
-			return nil
-		}
-	}
-	return errors.New("invalid signature - check KEY value")
-}
-
 // Close closes the WebSocket connection gracefully.
 // This method is safe to call multiple times.
 func (client *WebSocketClient) Close() {
@@ -245,7 +189,6 @@ func (client *WebSocketClient) handleHubRequest(msg *common.HubRequest[cbor.RawM
 		Agent:        client.agent,
 		Request:      msg,
 		RequestID:    requestID,
-		HubVerified:  client.hubVerified,
 		SendResponse: client.sendResponse,
 	}
 	return client.agent.handlerRegistry.Handle(ctx)
@@ -267,27 +210,6 @@ func (client *WebSocketClient) sendMessage(data any) error {
 }
 
 // sendResponse sends a response with optional request ID.
-// For ID-based requests, we must populate legacy typed fields for backward
-// compatibility with older hubs (<= 0.17) that don't read the generic Data field.
 func (client *WebSocketClient) sendResponse(data any, requestID *uint32) error {
-	if requestID != nil {
-		response := newAgentResponse(data, requestID)
-		return client.sendMessage(response)
-	}
-	// Legacy format - send data directly
-	return client.sendMessage(data)
-}
-
-// getUserAgent returns one of two User-Agent strings based on current time.
-// This is used to avoid being blocked by Cloudflare or other anti-bot measures.
-func getUserAgent() string {
-	const (
-		uaBase    = "Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-		uaWindows = "Windows NT 11.0; Win64; x64"
-		uaMac     = "Macintosh; Intel Mac OS X 14_0_0"
-	)
-	if time.Now().UnixNano()%2 == 0 {
-		return fmt.Sprintf(uaBase, uaWindows)
-	}
-	return fmt.Sprintf(uaBase, uaMac)
+	return client.sendMessage(newAgentResponse(data, requestID))
 }

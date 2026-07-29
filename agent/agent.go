@@ -10,13 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gliderlabs/ssh"
 	"github.com/henrygd/beszel"
 	"github.com/henrygd/beszel/agent/deltatracker"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/internal/common"
 	"github.com/henrygd/beszel/internal/entities/system"
-	gossh "golang.org/x/crypto/ssh"
 )
 
 const defaultDataCacheTimeMs uint16 = 60_000
@@ -35,7 +33,6 @@ type Agent struct {
 	netIoStats                map[uint16]system.NetIoStats                          // Keeps track of bandwidth usage per cache interval
 	netInterfaceDeltaTrackers map[uint16]*deltatracker.DeltaTracker[string, uint64] // Per-cache-time NIC delta trackers
 	dockerManager             *dockerManager                                        // Manages Docker API requests
-	sensorConfig              *SensorConfig                                         // Sensors config
 	systemInfo                system.Info                                           // Host system info (dynamic)
 	systemDetails             system.Details                                        // Host system details (static, once-per-connection)
 	detailsDirty              bool                                                  // Whether system details have changed and need to be resent
@@ -43,16 +40,11 @@ type Agent struct {
 	cache                     *systemDataCache                                      // Cache for system stats based on cache time
 	connectionManager         *ConnectionManager                                    // Channel to signal connection events
 	handlerRegistry           *HandlerRegistry                                      // Registry for routing incoming messages
-	server                    *ssh.Server                                           // SSH server
-	dataDir                   string                                                // Directory for persisting data
-	keys                      []gossh.PublicKey                                     // SSH public keys
-	smartManager              *SmartManager                                         // Manages SMART data
 	systemdManager            *systemdManager                                       // Manages systemd services
 }
 
-// NewAgent creates a new agent with the given data directory for persisting data.
-// If the data directory is not set, it will attempt to find the optimal directory.
-func NewAgent(dataDir ...string) (agent *Agent, err error) {
+// NewAgent creates a stateless monitoring agent.
+func NewAgent() (agent *Agent, err error) {
 	agent = &Agent{
 		fsStats: make(map[string]*system.FsStats),
 		cache:   NewSystemDataCache(),
@@ -64,15 +56,7 @@ func NewAgent(dataDir ...string) (agent *Agent, err error) {
 	agent.netIoStats = make(map[uint16]system.NetIoStats)
 	agent.netInterfaceDeltaTrackers = make(map[uint16]*deltatracker.DeltaTracker[string, uint64])
 
-	agent.dataDir, err = GetDataDir(dataDir...)
-	if err != nil {
-		slog.Warn("Data directory not found")
-	} else {
-		slog.Info("Data directory", "path", agent.dataDir)
-	}
-
 	agent.memCalc, _ = utils.GetEnv("MEM_CALC")
-	agent.sensorConfig = agent.newSensorConfig()
 
 	// Parse disk usage cache duration (e.g., "15m", "1h") to avoid waking sleeping disks
 	if diskUsageCache, exists := utils.GetEnv("DISK_USAGE_CACHE"); exists {
@@ -105,16 +89,6 @@ func NewAgent(dataDir ...string) (agent *Agent, err error) {
 	// initialize system info
 	agent.refreshSystemDetails()
 
-	// SMART_INTERVAL env var to update smart data at this interval
-	if smartIntervalEnv, exists := utils.GetEnv("SMART_INTERVAL"); exists {
-		if duration, err := time.ParseDuration(smartIntervalEnv); err == nil && duration > 0 {
-			agent.systemDetails.SmartInterval = duration
-			slog.Info("SMART_INTERVAL", "duration", duration)
-		} else {
-			slog.Warn("Invalid SMART_INTERVAL", "err", err)
-		}
-	}
-
 	// initialize connection manager
 	agent.connectionManager = newConnectionManager(agent)
 
@@ -130,11 +104,6 @@ func NewAgent(dataDir ...string) (agent *Agent, err error) {
 	agent.systemdManager, err = newSystemdManager()
 	if err != nil {
 		slog.Debug("Systemd", "err", err)
-	}
-
-	agent.smartManager, err = NewSmartManager()
-	if err != nil {
-		slog.Debug("SMART", "err", err)
 	}
 
 	// initialize GPU manager
@@ -214,12 +183,7 @@ func (a *Agent) gatherStats(options common.DataRequestOptions) *system.CombinedD
 	return a.attachSystemDetails(data, cacheTimeMs, options.IncludeDetails)
 }
 
-// Start initializes and starts the agent with optional WebSocket connection
-func (a *Agent) Start(serverOptions ServerOptions) error {
-	a.keys = serverOptions.Keys
-	return a.connectionManager.Start(serverOptions)
-}
-
-func (a *Agent) getFingerprint() string {
-	return GetFingerprint(a.dataDir, a.systemDetails.Hostname, a.systemDetails.CpuModel)
+// Start connects to the hub and blocks until shutdown.
+func (a *Agent) Start() error {
+	return a.connectionManager.Start()
 }

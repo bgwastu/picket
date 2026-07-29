@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/henrygd/beszel"
 	"github.com/henrygd/beszel/internal/common"
 	"github.com/henrygd/beszel/internal/hub/ws"
 )
@@ -40,11 +39,6 @@ func (t *WebSocketTransport) Request(ctx context.Context, action common.WebSocke
 		defer message.Close()
 		defer pendingReq.Cancel()
 
-		// Legacy agents (< MinVersionAgentResponse) respond with a raw payload instead of an AgentResponse wrapper.
-		if t.wsConn.AgentVersion().LT(beszel.MinVersionAgentResponse) {
-			return cbor.Unmarshal(message.Data.Bytes(), dest)
-		}
-
 		var agentResponse common.AgentResponse
 		if err := cbor.Unmarshal(message.Data.Bytes(), &agentResponse); err != nil {
 			return err
@@ -54,7 +48,7 @@ func (t *WebSocketTransport) Request(ctx context.Context, action common.WebSocke
 			return errors.New(agentResponse.Error)
 		}
 
-		return UnmarshalResponse(agentResponse, action, dest)
+		return UnmarshalResponse(agentResponse, dest)
 
 	case <-pendingReq.Context.Done():
 		return pendingReq.Context.Err()

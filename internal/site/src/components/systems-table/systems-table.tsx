@@ -1,4 +1,4 @@
-import { Trans, useLingui } from "@lingui/react/macro"
+import { Trans, useLingui } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { getPagePath } from "@nanostores/router"
 import {
@@ -71,7 +71,7 @@ export default function SystemsTable() {
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 	const [columnVisibility, setColumnVisibility] = useBrowserStorage<VisibilityState>("cols", {})
 
-	const locale = i18n.locale
+	const locale = "en"
 
 	// Filter data based on status filter
 	const filteredData = useMemo(() => {

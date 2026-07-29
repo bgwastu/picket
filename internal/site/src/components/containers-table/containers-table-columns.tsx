@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { EthernetIcon, HourglassIcon, SquareArrowRightEnterIcon } from "../ui/icons"
 import { Badge } from "../ui/badge"
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import { $allSystemsById, $longestSystemNameLen } from "@/lib/stores"
 import { useStore } from "@nanostores/react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"

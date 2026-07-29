@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import { MoreHorizontalIcon } from "lucide-react"
 import { memo, useRef, useState } from "react"
 import AreaChartDefault, { type DataPoint } from "@/components/charts/area-chart"

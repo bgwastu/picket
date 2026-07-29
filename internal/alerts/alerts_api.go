@@ -13,11 +13,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// UpsertUserAlerts handles API request to create or update alerts for a user
-// across multiple systems (POST /api/beszel/user-alerts)
-func UpsertUserAlerts(e *core.RequestEvent) error {
-	userID := e.Auth.Id
-
+// UpsertAlerts handles global alert creation and updates across systems.
+func UpsertAlerts(e *core.RequestEvent) error {
 	reqData := struct {
 		Min       uint8    `json:"min"`
 		Value     float64  `json:"value"`
@@ -26,7 +23,7 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 		Overwrite bool     `json:"overwrite"`
 	}{}
 	err := e.BindBody(&reqData)
-	if err != nil || userID == "" || reqData.Name == "" || len(reqData.Systems) == 0 {
+	if err != nil || reqData.Name == "" || len(reqData.Systems) == 0 {
 		return e.BadRequestError("Bad data", err)
 	}
 
@@ -39,8 +36,8 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 		for _, systemId := range reqData.Systems {
 			// find existing matching alert
 			alertRecord, err := txApp.FindFirstRecordByFilter(alertsCollection,
-				"system={:system} && name={:name} && user={:user}",
-				dbx.Params{"system": systemId, "name": reqData.Name, "user": userID})
+				"system={:system} && name={:name}",
+				dbx.Params{"system": systemId, "name": reqData.Name})
 
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
@@ -54,7 +51,6 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 			// create new alert if it doesn't exist
 			if alertRecord == nil {
 				alertRecord = core.NewRecord(alertsCollection)
-				alertRecord.Set("user", userID)
 				alertRecord.Set("system", systemId)
 				alertRecord.Set("name", reqData.Name)
 			}
@@ -76,17 +72,14 @@ func UpsertUserAlerts(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{"success": true})
 }
 
-// DeleteUserAlerts handles API request to delete alerts for a user across multiple systems
-// (DELETE /api/beszel/user-alerts)
-func DeleteUserAlerts(e *core.RequestEvent) error {
-	userID := e.Auth.Id
-
+// DeleteAlerts handles global alert deletion across systems.
+func DeleteAlerts(e *core.RequestEvent) error {
 	reqData := struct {
 		AlertName string   `json:"name"`
 		Systems   []string `json:"systems"`
 	}{}
 	err := e.BindBody(&reqData)
-	if err != nil || userID == "" || reqData.AlertName == "" || len(reqData.Systems) == 0 {
+	if err != nil || reqData.AlertName == "" || len(reqData.Systems) == 0 {
 		return e.BadRequestError("Bad data", err)
 	}
 
@@ -96,8 +89,8 @@ func DeleteUserAlerts(e *core.RequestEvent) error {
 		for _, systemId := range reqData.Systems {
 			// Find existing alert to delete
 			alertRecord, err := txApp.FindFirstRecordByFilter("alerts",
-				"system={:system} && name={:name} && user={:user}",
-				dbx.Params{"system": systemId, "name": reqData.AlertName, "user": userID})
+				"system={:system} && name={:name}",
+				dbx.Params{"system": systemId, "name": reqData.AlertName})
 
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -122,30 +115,22 @@ func DeleteUserAlerts(e *core.RequestEvent) error {
 	return e.JSON(http.StatusOK, map[string]any{"success": true, "count": numDeleted})
 }
 
-// SendTestNotification handles API request to send a test notification to a specified Shoutrrr URL
+// SendTestNotification sends a test message using the saved Telegram settings.
 func (am *AlertManager) SendTestNotification(e *core.RequestEvent) error {
-	var data struct {
-		URL string `json:"url"`
-	}
-	err := e.BindBody(&data)
-	if err != nil || data.URL == "" {
-		return e.BadRequestError("URL is required", err)
-	}
-	// Only allow admins to send test notifications to internal URLs
-	if !e.Auth.IsSuperuser() && e.Auth.GetString("role") != "admin" {
-		internalURL, err := isInternalURL(data.URL)
-		if err != nil {
-			return e.BadRequestError(err.Error(), nil)
-		}
-		if internalURL {
-			return e.ForbiddenError("Only admins can send to internal destinations", nil)
-		}
-	}
-	err = am.SendShoutrrrAlert(data.URL, "Test Alert", "This is a notification from Beszel.", am.hub.Settings().Meta.AppURL, "View Beszel")
+	record, err := e.App.FindFirstRecordByFilter("notification_settings", "id='globalsettings1'")
 	if err != nil {
-		return e.JSON(200, map[string]string{"err": err.Error()})
+		return e.InternalServerError("Notification settings are unavailable", err)
 	}
-	return e.JSON(200, map[string]bool{"err": false})
+	var settings NotificationSettings
+	if err := record.UnmarshalJSONField("settings", &settings); err != nil || settings.TelegramBotToken == "" || len(settings.TelegramUserIDs) == 0 {
+		return e.BadRequestError("Telegram bot token and allowed user IDs are required", err)
+	}
+	for _, userID := range settings.TelegramUserIDs {
+		if err = am.SendTelegramAlert(settings.TelegramBotToken, userID, "Test Alert", "This is a notification from Picket.", am.hub.Settings().Meta.AppURL); err != nil {
+			return e.InternalServerError("Telegram test failed", err)
+		}
+	}
+	return e.JSON(http.StatusOK, map[string]bool{"sent": true})
 }
 
 // isInternalURL checks if the given shoutrrr URL points to an internal destination (localhost or private IP)

@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/suspicious/noAssignInExpressions: it's fine :) */
 import type { PreinitializedMapStore } from "nanostores"
-import { pb, verifyAuth } from "@/lib/api"
+import { pb } from "@/lib/api"
 import {
 	$allSystemsById,
 	$allSystemsByName,
@@ -14,7 +14,7 @@ import type { SystemRecord } from "@/types"
 import { SystemStatus } from "./enums"
 
 const COLLECTION = pb.collection<SystemRecord>("systems")
-const FIELDS_DEFAULT = "id,name,host,port,info,status"
+const FIELDS_DEFAULT = "id,name,info,status"
 
 /** Maximum system name length for display purposes */
 const MAX_SYSTEM_NAME_LENGTH = 22
@@ -167,11 +167,7 @@ export async function subscribe() {
 export async function refresh() {
 	try {
 		const records = await fetchSystems()
-		if (!records.length) {
-			// No systems found, verify authentication
-			verifyAuth()
-			return
-		}
+		if (!records.length) return
 		for (const record of records) {
 			add(record)
 		}

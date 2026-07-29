@@ -1,4 +1,4 @@
-// Package beszel provides core application constants and version information
+// Package beszel provides Picket core application constants and version information
 // which are used throughout the application.
 package beszel
 
@@ -8,7 +8,7 @@ const (
 	// Version is the current version of the application.
 	Version = "0.18.7"
 	// AppName is the name of the application.
-	AppName = "beszel"
+	AppName = "picket"
 )
 
 // MinVersionCbor is the minimum supported version for CBOR compatibility.

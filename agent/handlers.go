@@ -2,24 +2,18 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/henrygd/beszel/internal/common"
-	"github.com/henrygd/beszel/internal/entities/smart"
-
-	"log/slog"
 )
 
 // HandlerContext provides context for request handlers
 type HandlerContext struct {
-	Client      *WebSocketClient
-	Agent       *Agent
-	Request     *common.HubRequest[cbor.RawMessage]
-	RequestID   *uint32
-	HubVerified bool
-	// SendResponse abstracts how a handler sends responses (WS or SSH)
+	Client       *WebSocketClient
+	Agent        *Agent
+	Request      *common.HubRequest[cbor.RawMessage]
+	RequestID    *uint32
 	SendResponse func(data any, requestID *uint32) error
 }
 
@@ -29,7 +23,7 @@ type RequestHandler interface {
 	Handle(hctx *HandlerContext) error
 }
 
-// Responder sends handler responses back to the hub (over WS or SSH)
+// Responder sends handler responses back to the hub.
 type Responder interface {
 	SendResponse(data any, requestID *uint32) error
 }
@@ -46,11 +40,8 @@ func NewHandlerRegistry() *HandlerRegistry {
 	}
 
 	registry.Register(common.GetData, &GetDataHandler{})
-	registry.Register(common.CheckFingerprint, &CheckFingerprintHandler{})
 	registry.Register(common.GetContainerLogs, &GetContainerLogsHandler{})
 	registry.Register(common.GetContainerInfo, &GetContainerInfoHandler{})
-	registry.Register(common.GetSmartData, &GetSmartDataHandler{})
-	registry.Register(common.GetSystemdInfo, &GetSystemdInfoHandler{})
 
 	return registry
 }
@@ -65,11 +56,6 @@ func (hr *HandlerRegistry) Handle(hctx *HandlerContext) error {
 	handler, exists := hr.handlers[hctx.Request.Action]
 	if !exists {
 		return fmt.Errorf("unknown action: %d", hctx.Request.Action)
-	}
-
-	// Check verification requirement - default to requiring verification
-	if hctx.Request.Action != common.CheckFingerprint && !hctx.HubVerified {
-		return errors.New("hub not verified")
 	}
 
 	// Log handler execution for debugging
@@ -96,16 +82,6 @@ func (h *GetDataHandler) Handle(hctx *HandlerContext) error {
 
 	sysStats := hctx.Agent.gatherStats(options)
 	return hctx.SendResponse(sysStats, hctx.RequestID)
-}
-
-////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////
-
-// CheckFingerprintHandler handles authentication challenges
-type CheckFingerprintHandler struct{}
-
-func (h *CheckFingerprintHandler) Handle(hctx *HandlerContext) error {
-	return hctx.Client.handleAuthChallenge(hctx.Request, hctx.RequestID)
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -156,50 +132,4 @@ func (h *GetContainerInfoHandler) Handle(hctx *HandlerContext) error {
 	}
 
 	return hctx.SendResponse(string(info), hctx.RequestID)
-}
-
-////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////
-
-// GetSmartDataHandler handles SMART data requests
-type GetSmartDataHandler struct{}
-
-func (h *GetSmartDataHandler) Handle(hctx *HandlerContext) error {
-	if hctx.Agent.smartManager == nil {
-		// return empty map to indicate no data
-		return hctx.SendResponse(map[string]smart.SmartData{}, hctx.RequestID)
-	}
-	if err := hctx.Agent.smartManager.Refresh(false); err != nil {
-		slog.Debug("smart refresh failed", "err", err)
-	}
-	data := hctx.Agent.smartManager.GetCurrentData()
-	return hctx.SendResponse(data, hctx.RequestID)
-}
-
-////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////
-
-// GetSystemdInfoHandler handles detailed systemd service info requests
-type GetSystemdInfoHandler struct{}
-
-func (h *GetSystemdInfoHandler) Handle(hctx *HandlerContext) error {
-	if hctx.Agent.systemdManager == nil {
-		return errors.ErrUnsupported
-	}
-
-	var req common.SystemdInfoRequest
-	if err := cbor.Unmarshal(hctx.Request.Data, &req); err != nil {
-		return err
-	}
-	if req.ServiceName == "" {
-		return errors.New("service name is required")
-	}
-
-	details, err := hctx.Agent.systemdManager.getServiceDetails(req.ServiceName)
-	if err != nil {
-		return err
-	}
-
-	return hctx.SendResponse(details, hctx.RequestID)
 }

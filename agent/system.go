@@ -3,14 +3,11 @@ package agent
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
-	"runtime"
 	"strings"
 
 	"github.com/henrygd/beszel"
-	"github.com/henrygd/beszel/agent/battery"
 	"github.com/henrygd/beszel/agent/utils"
 	"github.com/henrygd/beszel/agent/zfs"
 	"github.com/henrygd/beszel/internal/entities/container"
@@ -38,40 +35,23 @@ func (a *Agent) refreshSystemDetails() {
 	if arch, err := host.KernelArch(); err == nil {
 		a.systemDetails.Arch = arch
 	} else {
-		a.systemDetails.Arch = runtime.GOARCH
+		a.systemDetails.Arch = "unknown"
 	}
 
-	platform, _, version, _ := host.PlatformInformation()
+	platform, _, _, _ := host.PlatformInformation()
 
-	if platform == "darwin" {
-		a.systemDetails.Os = system.Darwin
-		a.systemDetails.OsName = fmt.Sprintf("macOS %s", version)
-	} else if strings.Contains(platform, "indows") {
-		a.systemDetails.Os = system.Windows
-		a.systemDetails.OsName = strings.Replace(platform, "Microsoft ", "", 1)
-		a.systemDetails.Kernel = version
-	} else if platform == "freebsd" {
-		a.systemDetails.Os = system.Freebsd
-		a.systemDetails.Kernel, _ = host.KernelVersion()
+	a.systemDetails.Os = system.Linux
+	a.systemDetails.OsName = hostInfo.OperatingSystem
+	if a.systemDetails.OsName == "" {
 		if prettyName, err := getOsPrettyName(); err == nil {
 			a.systemDetails.OsName = prettyName
 		} else {
-			a.systemDetails.OsName = "FreeBSD"
+			a.systemDetails.OsName = platform
 		}
-	} else {
-		a.systemDetails.Os = system.Linux
-		a.systemDetails.OsName = hostInfo.OperatingSystem
-		if a.systemDetails.OsName == "" {
-			if prettyName, err := getOsPrettyName(); err == nil {
-				a.systemDetails.OsName = prettyName
-			} else {
-				a.systemDetails.OsName = platform
-			}
-		}
-		a.systemDetails.Kernel = hostInfo.KernelVersion
-		if a.systemDetails.Kernel == "" {
-			a.systemDetails.Kernel, _ = host.KernelVersion()
-		}
+	}
+	a.systemDetails.Kernel = hostInfo.KernelVersion
+	if a.systemDetails.Kernel == "" {
+		a.systemDetails.Kernel, _ = host.KernelVersion()
 	}
 
 	// cpu model
@@ -130,12 +110,6 @@ func (a *Agent) updateSystemDetails(updateFunc func(details *system.Details)) {
 // Returns current info, stats about the host system
 func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 	var systemStats system.Stats
-
-	// battery
-	if batteryPercent, batteryState, err := battery.GetBatteryStats(); err == nil {
-		systemStats.Battery[0] = batteryPercent
-		systemStats.Battery[1] = batteryState
-	}
 
 	// cpu metrics
 	cpuMetrics, err := getCpuMetrics(cacheTimeMs)
@@ -212,10 +186,6 @@ func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 	// network stats (per cache interval)
 	a.updateNetworkStats(cacheTimeMs, &systemStats)
 
-	// temperatures
-	// TODO: maybe refactor to methods on systemStats
-	a.updateTemperatures(&systemStats)
-
 	// GPU data
 	if a.gpuManager != nil {
 		// reset high gpu percent
@@ -224,27 +194,9 @@ func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 		if gpuData := a.gpuManager.GetCurrentData(cacheTimeMs); len(gpuData) > 0 {
 			systemStats.GPUData = gpuData
 
-			// add temperatures
-			if systemStats.Temperatures == nil {
-				systemStats.Temperatures = make(map[string]float64, len(gpuData))
-			}
-			highestTemp := 0.0
 			for _, gpu := range gpuData {
-				if gpu.Temperature > 0 {
-					systemStats.Temperatures[gpu.Name] = gpu.Temperature
-					if a.sensorConfig.primarySensor == gpu.Name {
-						a.systemInfo.DashboardTemp = gpu.Temperature
-					}
-					if gpu.Temperature > highestTemp {
-						highestTemp = gpu.Temperature
-					}
-				}
 				// update high gpu percent for dashboard
 				a.systemInfo.GpuPct = max(a.systemInfo.GpuPct, gpu.Usage)
-			}
-			// use highest temp for dashboard temp if dashboard temp is unset
-			if a.systemInfo.DashboardTemp == 0 {
-				a.systemInfo.DashboardTemp = highestTemp
 			}
 		}
 	}
@@ -255,7 +207,6 @@ func (a *Agent) getSystemStats(cacheTimeMs uint16) system.Stats {
 	a.systemInfo.LoadAvg = systemStats.LoadAvg
 	a.systemInfo.MemPct = systemStats.MemPct
 	a.systemInfo.DiskPct = systemStats.DiskPct
-	a.systemInfo.Battery = systemStats.Battery
 	a.systemInfo.Uptime, _ = host.Uptime()
 	a.systemInfo.BandwidthBytes = systemStats.Bandwidth[0] + systemStats.Bandwidth[1]
 	a.systemInfo.Threads = a.systemDetails.Threads

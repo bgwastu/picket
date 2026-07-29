@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import AreaChartDefault from "@/components/charts/area-chart"
 import { useContainerDataPoints } from "@/components/charts/hooks"
 import { Unit } from "@/lib/enums"
@@ -136,7 +136,6 @@ export function SwapChart({
 	dataEmpty: boolean
 	systemStats: SystemStatsRecord[]
 }) {
-	// const userSettings = useStore($userSettings)
 
 	const hasSwapData = (systemStats.at(-1)?.stats.su ?? 0) > 0
 	if (!hasSwapData) {

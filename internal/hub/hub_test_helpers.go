@@ -11,16 +11,6 @@ func (h *Hub) GetSystemManager() *systems.SystemManager {
 	return h.sm
 }
 
-// TESTING ONLY: GetPubkey returns the public key
-func (h *Hub) GetPubkey() string {
-	return h.pubKey
-}
-
-// TESTING ONLY: SetPubkey sets the public key
-func (h *Hub) SetPubkey(pubkey string) {
-	h.pubKey = pubkey
-}
-
 func (h *Hub) SetCollectionAuthSettings() error {
-	return setCollectionAuthSettings(h)
+	return setCollectionAccessSettings(h)
 }

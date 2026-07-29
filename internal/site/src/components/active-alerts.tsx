@@ -1,7 +1,7 @@
 import { alertInfo } from "@/lib/alerts"
 import { $alerts, $allSystemsById } from "@/lib/stores"
 import type { AlertRecord } from "@/types"
-import { Plural, Trans } from "@lingui/react/macro"
+import { Plural, Trans } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { getPagePath } from "@nanostores/router"
 import { useMemo } from "react"

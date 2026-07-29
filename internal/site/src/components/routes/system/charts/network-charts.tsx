@@ -1,8 +1,8 @@
 import { useMemo } from "react"
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import AreaChartDefault from "@/components/charts/area-chart"
 import { useContainerDataPoints } from "@/components/charts/hooks"
-import { $userSettings } from "@/lib/stores"
+import { $displaySettings } from "@/lib/stores"
 import { decimalString, formatBytes, toFixedFloat } from "@/lib/utils"
 import type { ChartConfig } from "@/components/ui/chart"
 import { pinnedAxisDomain } from "@/components/ui/chart"
@@ -30,7 +30,7 @@ export function BandwidthChart({
 	systemStats: SystemStatsRecord[]
 }) {
 	const maxValSelect = isLongerChart ? <SelectAvgMax max={maxValues} /> : null
-	const userSettings = $userSettings.get()
+	const userSettings = $displaySettings.get()
 
 	return (
 		<ChartCard
@@ -101,7 +101,7 @@ export function ContainerNetworkChart({
 	isPodman: boolean
 	networkConfig: ChartConfig
 }) {
-	const userSettings = $userSettings.get()
+	const userSettings = $displaySettings.get()
 	const { filter, dataPoints, filteredKeys } = useContainerDataPoints(networkConfig, (key, data) => {
 		const payload = data[key]
 		if (!payload) return null

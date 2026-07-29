@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import AreaChartDefault from "@/components/charts/area-chart"
 import { decimalString, formatBytes, toFixedFloat } from "@/lib/utils"
 import type { SystemStatsRecord } from "@/types"
@@ -8,7 +8,7 @@ import { pinnedAxisDomain } from "@/components/ui/chart"
 import DiskIoSheet from "../disk-io-sheet"
 import type { SystemData } from "../use-system-data"
 import { useStore } from "@nanostores/react"
-import { $userSettings } from "@/lib/stores"
+import { $displaySettings } from "@/lib/stores"
 
 // Helpers for indexed dios/diosm access
 const dios =
@@ -146,7 +146,7 @@ export function DiskUsageChart({ systemData, extraFsName }: { systemData: System
 export function DiskIOChart({ systemData, extraFsName }: { systemData: SystemData; extraFsName?: string }) {
 	const { chartData, grid, dataEmpty, showMax, isLongerChart, maxValues } = systemData
 	const maxValSelect = isLongerChart ? <SelectAvgMax max={maxValues} /> : null
-	const userSettings = useStore($userSettings)
+	const userSettings = useStore($displaySettings)
 
 	if (!chartData.systemStats?.length) {
 		return null

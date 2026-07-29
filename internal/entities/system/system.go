@@ -32,7 +32,6 @@ type Stats struct {
 	NetworkRecv    float64             `json:"nr,omitzero" cbor:"17,keyasint,omitzero"`
 	MaxNetworkSent float64             `json:"nsm,omitempty" cbor:"-"`
 	MaxNetworkRecv float64             `json:"nrm,omitempty" cbor:"-"`
-	Temperatures   map[string]float64  `json:"t,omitempty" cbor:"20,keyasint,omitempty"`
 	ExtraFs        map[string]*FsStats `json:"efs,omitempty" cbor:"21,keyasint,omitempty"`
 	GPUData        map[string]GPUData  `json:"g,omitempty" cbor:"22,keyasint,omitempty"`
 	// LoadAvg1       float64             `json:"l1,omitempty" cbor:"23,keyasint,omitempty"`
@@ -42,7 +41,6 @@ type Stats struct {
 	MaxBandwidth [2]uint64 `json:"bm,omitzero" cbor:"-"`                   // [sent bytes, recv bytes]
 	// TODO: remove other load fields in future release in favor of load avg array
 	LoadAvg           [3]float64           `json:"la,omitempty" cbor:"28,keyasint"`
-	Battery           [2]uint8             `json:"bat,omitzero" cbor:"29,keyasint,omitzero"`    // [percent, charge state, current]
 	NetworkInterfaces map[string][4]uint64 `json:"ni,omitempty" cbor:"31,keyasint,omitempty"`   // [upload bytes, download bytes, total upload, total download]
 	DiskIO            [2]uint64            `json:"dio,omitzero" cbor:"32,keyasint,omitzero"`    // [read bytes, write bytes]
 	MaxDiskIO         [2]uint64            `json:"diom,omitzero" cbor:"-"`                      // [max read bytes, max write bytes]
@@ -133,18 +131,17 @@ type Info struct {
 	KernelVersion string `json:"k,omitempty" cbor:"1,keyasint,omitempty"` // deprecated - moved to Details struct
 	Cores         int    `json:"c,omitzero" cbor:"2,keyasint,omitzero"`   // deprecated - moved to Details struct
 	// Threads is needed in Info struct to calculate load average thresholds
-	Threads       int     `json:"t,omitempty" cbor:"3,keyasint,omitempty"`
-	CpuModel      string  `json:"m,omitempty" cbor:"4,keyasint,omitempty"` // deprecated - moved to Details struct
-	Uptime        uint64  `json:"u" cbor:"5,keyasint"`
-	Cpu           float64 `json:"cpu" cbor:"6,keyasint"`
-	MemPct        float64 `json:"mp" cbor:"7,keyasint"`
-	DiskPct       float64 `json:"dp" cbor:"8,keyasint"`
-	Bandwidth     float64 `json:"b,omitzero" cbor:"9,keyasint"` // deprecated in favor of BandwidthBytes
-	AgentVersion  string  `json:"v" cbor:"10,keyasint"`
-	Podman        bool    `json:"p,omitempty" cbor:"11,keyasint,omitempty"` // deprecated - moved to Details struct
-	GpuPct        float64 `json:"g,omitempty" cbor:"12,keyasint,omitempty"`
-	DashboardTemp float64 `json:"dt,omitempty" cbor:"13,keyasint,omitempty"`
-	Os            Os      `json:"os,omitempty" cbor:"14,keyasint,omitempty"` // deprecated - moved to Details struct
+	Threads      int     `json:"t,omitempty" cbor:"3,keyasint,omitempty"`
+	CpuModel     string  `json:"m,omitempty" cbor:"4,keyasint,omitempty"` // deprecated - moved to Details struct
+	Uptime       uint64  `json:"u" cbor:"5,keyasint"`
+	Cpu          float64 `json:"cpu" cbor:"6,keyasint"`
+	MemPct       float64 `json:"mp" cbor:"7,keyasint"`
+	DiskPct      float64 `json:"dp" cbor:"8,keyasint"`
+	Bandwidth    float64 `json:"b,omitzero" cbor:"9,keyasint"` // deprecated in favor of BandwidthBytes
+	AgentVersion string  `json:"v" cbor:"10,keyasint"`
+	Podman       bool    `json:"p,omitempty" cbor:"11,keyasint,omitempty"` // deprecated - moved to Details struct
+	GpuPct       float64 `json:"g,omitempty" cbor:"12,keyasint,omitempty"`
+	Os           Os      `json:"os,omitempty" cbor:"14,keyasint,omitempty"` // deprecated - moved to Details struct
 	// LoadAvg1       float64 `json:"l1,omitempty" cbor:"15,keyasint,omitempty"`  // deprecated - use `la` array instead
 	// LoadAvg5       float64 `json:"l5,omitempty" cbor:"16,keyasint,omitempty"`  // deprecated - use `la` array instead
 	// LoadAvg15      float64 `json:"l15,omitempty" cbor:"17,keyasint,omitempty"` // deprecated - use `la` array instead
@@ -154,7 +151,6 @@ type Info struct {
 	ConnectionType ConnectionType     `json:"ct,omitempty" cbor:"20,keyasint,omitempty,omitzero"`
 	ExtraFsPct     map[string]float64 `json:"efs,omitempty" cbor:"21,keyasint,omitempty"`
 	Services       []uint16           `json:"sv,omitempty" cbor:"22,keyasint,omitempty"` // [totalServices, numFailedServices]
-	Battery        [2]uint8           `json:"bat,omitzero" cbor:"23,keyasint,omitzero"`  // [percent, charge state]
 }
 
 // Data that does not change during process lifetime and is not needed in All Systems table

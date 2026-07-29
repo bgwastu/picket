@@ -1,4 +1,4 @@
-import { t } from "@lingui/core/macro"
+import { t } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { MoreHorizontalIcon } from "lucide-react"
 import { memo, useRef, useState } from "react"
@@ -7,7 +7,7 @@ import ChartTimeSelect from "@/components/charts/chart-time-select"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { DialogTitle } from "@/components/ui/dialog"
-import { $userSettings } from "@/lib/stores"
+import { $displaySettings } from "@/lib/stores"
 import { decimalString, formatBytes, toFixedFloat } from "@/lib/utils"
 import { ChartCard, SelectAvgMax } from "@/components/routes/system/chart-card"
 import type { SystemData } from "@/components/routes/system/use-system-data"
@@ -26,7 +26,7 @@ export default memo(function DiskIOSheet({
 	description: string
 }) {
 	const { chartData, grid, dataEmpty, showMax, maxValues, isLongerChart } = systemData
-	const userSettings = useStore($userSettings)
+	const userSettings = useStore($displaySettings)
 
 	const [sheetOpen, setSheetOpen] = useState(false)
 

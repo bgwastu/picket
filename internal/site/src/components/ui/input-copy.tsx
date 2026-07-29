@@ -1,11 +1,11 @@
-import { Trans } from "@lingui/react/macro"
+import { Trans } from "@/lib/english"
 import { CopyIcon } from "lucide-react"
 import { copyToClipboard } from "@/lib/utils"
 import { Button } from "./button"
 import { Input } from "./input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
 
-export function InputCopy({ value, id, name }: { value: string; id: string; name: string }) {
+export function InputCopy({ value, id, name }: { value: string; id?: string; name?: string }) {
 	return (
 		<div className="relative">
 			<Input readOnly id={id} name={name} value={value} required></Input>

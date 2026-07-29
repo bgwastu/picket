@@ -27,7 +27,7 @@ const (
 	nvtopCmd        string = "nvtop"
 	powermetricsCmd string = "powermetrics"
 	macmonCmd       string = "macmon"
-	noGPUFoundMsg   string = "no GPU found - see https://beszel.dev/guide/gpu"
+	noGPUFoundMsg   string = "no GPU found"
 
 	// Command retry and timeout constants
 	retryWaitTime     time.Duration = 5 * time.Second
@@ -484,7 +484,7 @@ func (gm *GPUManager) startIntelCollector() {
 				if failures > maxFailureRetries {
 					break
 				}
-				slog.Warn("Error collecting Intel GPU data; see https://beszel.dev/guide/gpu", "err", err)
+				slog.Warn("Error collecting Intel GPU data", "err", err)
 				time.Sleep(retryWaitTime)
 				continue
 			}
