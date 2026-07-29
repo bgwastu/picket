@@ -12,10 +12,25 @@ Picket is a lightweight server monitoring dashboard with a hub and agents. It wa
 
 ## Run the Hub
 
+Run the published image:
+
+```sh
+docker run -d \
+  --name picket \
+  -p 8090:8090 \
+  -e PICKET_HUB_PASSWORD=change-me \
+  -v picket_data:/picket_data \
+  ghcr.io/bgwastu/picket:latest
+```
+
+Then open `http://127.0.0.1:8090` and sign in with that password.
+
+For a local binary build:
+
 ```sh
 PICKET_HUB_PASSWORD=change-me ./picket-hub serve
 ```
 
-Open `http://127.0.0.1:8090` and sign in with that password.
+The image is published to GitHub Container Registry on every version tag.
 
 Picket is released under the MIT License.
