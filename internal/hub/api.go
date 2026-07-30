@@ -171,6 +171,14 @@ set -eu
 [ "$(id -u)" -eq 0 ] || { echo "Run this installer as root or with sudo." >&2; exit 1; }
 HUB_URL=${HUB_URL:-%q}
 TOKEN=${TOKEN:-%q}
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$os/$arch" in
+  linux/x86_64|linux/amd64) asset=linux-amd64 ;;
+  linux/aarch64|linux/arm64) asset=linux-arm64 ;;
+  linux/armv7l|linux/armv7) asset=linux-armv7 ;;
+  *) echo "unsupported platform: $os/$arch" >&2; exit 1 ;;
+esac
 AGENT_BIN=${AGENT_BIN:-/usr/local/bin/picket-agent}
 RUNNER=/usr/local/libexec/picket-agent-runner
 SERVICE_FILE=/etc/systemd/system/picket-agent.service
@@ -180,7 +188,7 @@ HUB_URL=$HUB_URL
 TOKEN=$TOKEN
 EOF
 if ! command -v curl >/dev/null 2>&1; then echo "curl is required" >&2; exit 1; fi
-curl -fsSL "$HUB_URL/api/picket/agent-binary?token=$TOKEN" -o "$AGENT_BIN.tmp"
+curl -fsSL "$HUB_URL/api/picket/agent-binary?token=$TOKEN&os=$asset" -o "$AGENT_BIN.tmp"
 chmod 0755 "$AGENT_BIN.tmp"
 mv "$AGENT_BIN.tmp" "$AGENT_BIN"
 cat > "$RUNNER" <<'EOF'
@@ -188,7 +196,15 @@ cat > "$RUNNER" <<'EOF'
 set -eu
 . /etc/picket/agent.env
 BIN=/usr/local/bin/picket-agent
-URL="$HUB_URL/api/picket/agent-binary?token=$TOKEN"
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$os/$arch" in
+  linux/x86_64|linux/amd64) asset=linux-amd64 ;;
+  linux/aarch64|linux/arm64) asset=linux-arm64 ;;
+  linux/armv7l|linux/armv7) asset=linux-armv7 ;;
+  *) echo "unsupported platform: $os/$arch" >&2; exit 1 ;;
+esac
+URL="$HUB_URL/api/picket/agent-binary?token=$TOKEN&os=$asset"
 while :; do
   curl -fsSL "$URL" -o "$BIN.next" && chmod 0755 "$BIN.next" && mv "$BIN.next" "$BIN"
   "$BIN" &
@@ -252,7 +268,21 @@ func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {
 	if _, err := h.FindFirstRecordByFilter("systems", "token = {:token}", dbx.Params{"token": token}); err != nil {
 		return e.UnauthorizedError("Invalid agent token", nil)
 	}
+	asset := e.Request.URL.Query().Get("os")
+	if asset == "" {
+		asset = "native"
+	}
+	paths := map[string]string{
+		"linux-amd64": "/linux-amd64",
+		"linux-arm64": "/linux-arm64",
+		"linux-armv7": "/linux-armv7",
+	}
 	path := os.Getenv("PICKET_AGENT_BINARY")
+	if binaryDir := os.Getenv("PICKET_AGENT_BINARY_DIR"); binaryDir != "" {
+		if suffix, ok := paths[asset]; ok {
+			path = strings.TrimSuffix(binaryDir, "/") + suffix
+		}
+	}
 	if path == "" {
 		return e.NotFoundError("Agent binary is not configured", nil)
 	}
