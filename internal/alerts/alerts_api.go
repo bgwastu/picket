@@ -125,19 +125,19 @@ func (am *AlertManager) SendTestNotification(e *core.RequestEvent) error {
 	if err := record.UnmarshalJSONField("settings", &settings); err != nil || settings.TelegramBotToken == "" || len(settings.TelegramUserIDs) == 0 {
 		return e.BadRequestError("Telegram bot token and allowed user IDs are required", err)
 	}
-	settings.TelegramUserIDs = nonEmptyTelegramUserIDs(settings.TelegramUserIDs)
+	settings.TelegramUserIDs = NonEmptyTelegramUserIDs(settings.TelegramUserIDs)
 	if len(settings.TelegramUserIDs) == 0 {
 		return e.BadRequestError("Telegram bot token and allowed user IDs are required", nil)
 	}
 	for _, userID := range settings.TelegramUserIDs {
-		if err = am.SendTelegramAlert(settings.TelegramBotToken, userID, "Test Alert", "This is a notification from Picket.", am.hub.MakeLink()); err != nil {
+		if err = am.SendTelegramAlert(settings.TelegramBotToken, userID, "Test Alert", "This is a notification from Picket.", ""); err != nil {
 			return e.InternalServerError("Telegram test failed: "+err.Error(), err)
 		}
 	}
 	return e.JSON(http.StatusOK, map[string]bool{"sent": true})
 }
 
-func nonEmptyTelegramUserIDs(userIDs []string) []string {
+func NonEmptyTelegramUserIDs(userIDs []string) []string {
 	filtered := make([]string, 0, len(userIDs))
 	for _, userID := range userIDs {
 		if userID = strings.TrimSpace(userID); userID != "" {

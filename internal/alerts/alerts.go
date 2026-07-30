@@ -130,7 +130,7 @@ func (am *AlertManager) SendAlert(data AlertMessageData) error {
 	if err := record.UnmarshalJSONField("settings", &notificationSettings); err != nil {
 		am.hub.Logger().Error("Failed to unmarshal user settings", "err", err)
 	}
-	notificationSettings.TelegramUserIDs = nonEmptyTelegramUserIDs(notificationSettings.TelegramUserIDs)
+	notificationSettings.TelegramUserIDs = NonEmptyTelegramUserIDs(notificationSettings.TelegramUserIDs)
 	if notificationSettings.TelegramBotToken == "" || len(notificationSettings.TelegramUserIDs) == 0 {
 		return nil
 	}
@@ -175,16 +175,19 @@ func (am *AlertManager) SendShoutrrrAlert(notificationUrl, title, message, link,
 		message = title + "\n\n" + message
 	}
 
-	// Add link
-	switch scheme {
-	case "ntfy":
-		queryParams.Add("Actions", fmt.Sprintf("view, %s, %s", linkText, link))
-	case "lark":
-		queryParams.Add("link", link)
-	case "bark":
-		queryParams.Add("url", link)
-	default:
-		message += "\n\n" + link
+	// Add a link only when the caller supplied one. Telegram test messages are
+	// intentionally plain and must not include the dashboard URL.
+	if link != "" {
+		switch scheme {
+		case "ntfy":
+			queryParams.Add("Actions", fmt.Sprintf("view, %s, %s", linkText, link))
+		case "lark":
+			queryParams.Add("link", link)
+		case "bark":
+			queryParams.Add("url", link)
+		default:
+			message += "\n\n" + link
+		}
 	}
 
 	// Encode the modified query parameters back into the URL

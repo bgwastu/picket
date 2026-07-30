@@ -389,8 +389,12 @@ func (h *Hub) updateNotificationSettings(e *core.RequestEvent) error {
 	if err := e.BindBody(&settings); err != nil {
 		return e.BadRequestError("Invalid notification settings", err)
 	}
+	settings.TelegramUserIDs = alerts.NonEmptyTelegramUserIDs(settings.TelegramUserIDs)
 	if (settings.TelegramBotToken == "") != (len(settings.TelegramUserIDs) == 0) {
 		return e.BadRequestError("Telegram bot token and allowed user IDs must be configured together", errors.New("incomplete Telegram settings"))
+	}
+	if settings.TelegramBotToken != "" && len(settings.TelegramUserIDs) == 0 {
+		return e.BadRequestError("At least one allowed Telegram user ID is required", errors.New("empty Telegram user list"))
 	}
 	record, err := e.App.FindFirstRecordByFilter("notification_settings", "id = 'globalsettings1'")
 	if err != nil {
