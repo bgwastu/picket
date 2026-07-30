@@ -220,7 +220,13 @@ mv "$tmp" "$AGENT_BIN"
 cat > "$RUNNER" <<'EOF'
 #!/bin/sh
 set -eu
+set -a
 . /etc/picket/agent.env
+set +a
+if [ -z "${HUB_URL:-}" ] || [ -z "${TOKEN:-}" ]; then
+  echo "ERROR: /etc/picket/agent.env must define HUB_URL and TOKEN" >&2
+  exit 1
+fi
 BIN=/usr/local/bin/picket-agent
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
