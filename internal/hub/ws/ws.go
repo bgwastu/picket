@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"log/slog"
+	"sync"
 	"time"
 	"weak"
 
@@ -25,6 +27,8 @@ type WsConn struct {
 	conn           *gws.Conn
 	requestManager *RequestManager
 	DownChan       chan struct{}
+	streamHandler  func(*gws.Message) bool
+	writeMu        sync.Mutex
 }
 
 var upgrader *gws.Upgrader
@@ -41,11 +45,43 @@ func GetUpgrader() *gws.Upgrader {
 
 // NewWsConnection creates a new WebSocket connection wrapper.
 func NewWsConnection(conn *gws.Conn) *WsConn {
-	return &WsConn{
-		conn:           conn,
-		requestManager: NewRequestManager(conn),
-		DownChan:       make(chan struct{}, 1),
+	ws := &WsConn{
+		conn:     conn,
+		DownChan: make(chan struct{}, 1),
 	}
+	ws.requestManager = NewRequestManager(conn, func(data []byte) error {
+		ws.writeMu.Lock()
+		defer ws.writeMu.Unlock()
+		return conn.WriteMessage(gws.OpcodeBinary, data)
+	})
+	return ws
+}
+
+// SetStreamHandler installs a handler for non-request stream messages.
+func (ws *WsConn) SetStreamHandler(handler func(*gws.Message) bool) {
+	ws.streamHandler = handler
+}
+
+// SendStream sends a binary stream frame to the agent.
+func (ws *WsConn) SendStream(data any) error {
+	if ws.conn == nil {
+		return gws.ErrConnClosed
+	}
+	streamData, err := cbor.Marshal(data)
+	if err != nil {
+		return err
+	}
+	bytes, err := cbor.Marshal(common.HubRequest[cbor.RawMessage]{Action: common.SSHStream, Data: streamData})
+	if err != nil {
+		return err
+	}
+	ws.writeMu.Lock()
+	err = ws.conn.WriteMessage(gws.OpcodeBinary, bytes)
+	ws.writeMu.Unlock()
+	if err != nil {
+		slog.Warn("Failed to send WebSocket stream", "err", err)
+	}
+	return err
 }
 
 // OnOpen sets a deadline for the WebSocket connection and extracts agent version.
@@ -64,7 +100,11 @@ func (h *Handler) OnMessage(conn *gws.Conn, message *gws.Message) {
 		_ = conn.WriteClose(1000, nil)
 		return
 	}
-	wsConn.(*WsConn).requestManager.handleResponse(message)
+	ws := wsConn.(*WsConn)
+	if ws.streamHandler != nil && ws.streamHandler(message) {
+		return
+	}
+	ws.requestManager.handleResponse(message)
 }
 
 // OnClose handles WebSocket connection closures and triggers system down status after delay.

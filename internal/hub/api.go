@@ -40,7 +40,7 @@ func (h *Hub) isPublicRequest(e *core.RequestEvent) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return true
 	}
-	return path == "/api/health" || path == "/api/picket/auth" || path == "/api/picket/agent-connect" || path == "/api/picket/agent-binary"
+	return path == "/api/health" || path == "/api/picket/auth" || path == "/api/picket/agent-connect" || path == "/api/picket/agent-binary" || path == "/api/picket/ssh-connect" || strings.HasPrefix(path, "/api/picket/ssh-launch/") || path == "/api/picket/ssh-connector"
 }
 
 func hasDashboardSession(cookieHeader, passwordHash string) bool {
@@ -78,6 +78,12 @@ func (h *Hub) registerApiRoutes(se *core.ServeEvent) error {
 	api.POST("/auth", h.authenticateDashboard)
 	api.POST("/systems", h.createSystem)
 	api.GET("/systems/{id}/install-script", h.getAgentInstallScript)
+	api.POST("/systems/{id}/ssh-launch", h.createSSHLaunch)
+	api.POST("/systems/{id}/uninstall-agent", h.uninstallAgent)
+	api.GET("/ssh-connect", h.handleSSHConnect)
+	api.GET("/ssh-launch/{token}", h.getSSHLauncher)
+	api.DELETE("/ssh-launch/{token}", h.revokeSSHLaunch)
+	api.GET("/ssh-connector", h.serveSSHConnector)
 	api.GET("/agent-binary", h.serveAgentBinary)
 	// send test notification
 	api.POST("/test-notification", h.SendTestNotification)
@@ -226,6 +232,14 @@ func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {
 	e.Response.Header().Set("Content-Type", "application/octet-stream")
 	e.Response.Header().Set("Content-Disposition", "attachment; filename=picket-agent")
 	return e.Blob(http.StatusOK, "application/octet-stream", data)
+}
+
+func (h *Hub) handleSSHConnect(e *core.RequestEvent) error {
+	token := e.Request.URL.Query().Get("token")
+	if token == "" {
+		return e.UnauthorizedError("SSH launch token required", nil)
+	}
+	return h.ssh.connectUser(e, token)
 }
 
 // getInfo returns public hub information.

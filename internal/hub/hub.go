@@ -28,6 +28,7 @@ type Hub struct {
 	sm                    *systems.SystemManager
 	appURL                string
 	dashboardPasswordHash string
+	ssh                   *sshManager
 }
 
 // NewHub creates a new Hub instance with default configuration
@@ -36,6 +37,7 @@ func NewHub(app core.App) *Hub {
 	hub.AlertManager = alerts.NewAlertManager(hub)
 	hub.rm = records.NewRecordManager(hub)
 	hub.sm = systems.NewSystemManager(hub)
+	hub.ssh = newSSHManager()
 	_ = onAfterBootstrapAndMigrations(app, hub.initialize)
 	return hub
 }

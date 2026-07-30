@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/henrygd/beszel/internal/common"
@@ -42,8 +45,40 @@ func NewHandlerRegistry() *HandlerRegistry {
 	registry.Register(common.GetData, &GetDataHandler{})
 	registry.Register(common.GetContainerLogs, &GetContainerLogsHandler{})
 	registry.Register(common.GetContainerInfo, &GetContainerInfoHandler{})
+	registry.Register(common.UninstallAgent, &UninstallAgentHandler{})
 
 	return registry
+}
+
+// UninstallAgentHandler removes the files created by Picket's systemd installer.
+// It responds first, then schedules cleanup so the acknowledgement can cross
+// the WebSocket before the service is stopped.
+type UninstallAgentHandler struct{}
+
+func (h *UninstallAgentHandler) Handle(hctx *HandlerContext) error {
+	if os.Geteuid() != 0 {
+		return hctx.SendResponse(common.UninstallAgentResponse{Message: "agent is not running as root"}, hctx.RequestID)
+	}
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		return hctx.SendResponse(common.UninstallAgentResponse{Message: "systemd is not available; remove this installation manually"}, hctx.RequestID)
+	}
+	if err := hctx.SendResponse(common.UninstallAgentResponse{Uninstalled: true, Message: "uninstall scheduled"}, hctx.RequestID); err != nil {
+		return err
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		_ = exec.Command("systemctl", "disable", "--now", "picket-agent.service").Run()
+		for _, file := range []string{
+			"/usr/local/bin/picket-agent",
+			"/usr/local/libexec/picket-agent-runner",
+			"/etc/systemd/system/picket-agent.service",
+			"/etc/picket/agent.env",
+		} {
+			_ = os.Remove(file)
+		}
+		_ = exec.Command("systemctl", "daemon-reload").Run()
+	}()
+	return nil
 }
 
 // Register registers a handler for a specific action type

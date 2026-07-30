@@ -58,6 +58,41 @@ export default function InfoBar({
 	const [installScript, setInstallScript] = useState("")
 	const [installOpen, setInstallOpen] = useState(false)
 	const [deleteOpen, setDeleteOpen] = useState(false)
+	const [uninstallOpen, setUninstallOpen] = useState(false)
+	const [sshOpen, setSshOpen] = useState(false)
+	const [sshCommand, setSshCommand] = useState("")
+	const [sshPrompt, setSshPrompt] = useState("")
+	const [sshExpiresAt, setSshExpiresAt] = useState<string | null>(null)
+	const [sshLoading, setSshLoading] = useState(false)
+
+	async function createSSHLaunch() {
+		setSshLoading(true)
+		try {
+			const response = await fetch(`/api/picket/systems/${system.id}/ssh-launch`, {
+				method: "POST",
+				credentials: "same-origin",
+				headers: { "Content-Type": "application/json" },
+			})
+			if (!response.ok) throw new Error("Unable to create SSH launch")
+			const launch = await response.json() as { token: string; expiresAt: string }
+			const launchURL = `${window.location.origin}${PICKET.BASE_PATH}api/picket/ssh-launch/${launch.token}`
+			const command = `curl -fsSL '${launchURL}' | sh`
+			setSshCommand(command)
+			setSshPrompt(`Use this temporary Picket SSH access command to connect to ${system.name}. Run it in a trusted terminal, then use the resulting SSH session to inspect or operate the host. Access expires at ${new Date(launch.expiresAt).toLocaleString()}.\n\n${command}`)
+			setSshExpiresAt(launch.expiresAt)
+		} finally {
+			setSshLoading(false)
+		}
+	}
+
+	async function revokeSSHLaunch() {
+		if (!sshCommand) return
+		const token = sshCommand.match(/ssh-launch\/([^']+)/)?.[1]
+		if (token) await fetch(`${PICKET.BASE_PATH}api/picket/ssh-launch/${token}`, { method: "DELETE", credentials: "same-origin" })
+		setSshCommand("")
+		setSshPrompt("")
+		setSshExpiresAt(null)
+	}
 
 	async function loadInstallScript() {
 		const response = await fetch(`/api/picket/systems/${system.id}/install-script`, { credentials: "same-origin" })
@@ -70,6 +105,12 @@ export default function InfoBar({
 	async function deleteSystem() {
 		await pb.collection("systems").delete(system.id)
 		navigate("/")
+	}
+
+	async function uninstallAgent() {
+		const response = await fetch(`/api/picket/systems/${system.id}/uninstall-agent`, { method: "POST", credentials: "same-origin" })
+		if (!response.ok) throw new Error("Unable to uninstall agent")
+		setUninstallOpen(false)
 	}
 
 	// values for system info bar - use details with fallback to system.info
@@ -276,6 +317,8 @@ export default function InfoBar({
 						<DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Agent actions"><MoreHorizontalIcon className="size-4" /></Button></DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuLabel>Agent</DropdownMenuLabel>
+							<DropdownMenuItem onSelect={() => setSshOpen(true)}>Connect over SSH</DropdownMenuItem>
+							<DropdownMenuItem className="text-destructive" onSelect={() => setUninstallOpen(true)}>Uninstall agent from host</DropdownMenuItem>
 							<DropdownMenuItem onSelect={() => setEditOpen(true)}>Rename agent</DropdownMenuItem>
 							<DropdownMenuItem onSelect={() => void loadInstallScript()}>Show install script</DropdownMenuItem>
 							<DropdownMenuSeparator />
@@ -294,11 +337,32 @@ export default function InfoBar({
 					</div>
 				</DialogContent>
 			</Dialog>
+			<Dialog open={sshOpen} onOpenChange={setSshOpen}>
+				<DialogContent className="w-[92%] sm:max-w-2xl rounded-lg">
+					<div className="space-y-4">
+						<div><h2 className="text-lg font-semibold">Temporary SSH access</h2><p className="text-sm text-muted-foreground">Generate a short-lived command for the account running Picket. SSH sessions close after 15 minutes without traffic.</p></div>
+						{sshCommand ? <>
+							<div className="space-y-2"><p className="text-sm font-medium">Terminal command</p><InputCopy value={sshCommand} /></div>
+							{sshExpiresAt && <p className="text-sm text-muted-foreground">Access expires at {new Date(sshExpiresAt).toLocaleString()}.</p>}
+							<div className="space-y-2"><p className="text-sm font-medium">Prompt for an AI agent</p><InputCopy value={sshPrompt} /></div>
+							<div className="flex justify-end gap-2"><Button variant="destructive" onClick={() => void revokeSSHLaunch()}>Close access</Button><Button variant="outline" onClick={() => setSshOpen(false)}>Close</Button></div>
+						</> : <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setSshOpen(false)}>Cancel</Button><Button onClick={() => void createSSHLaunch()} disabled={sshLoading}>{sshLoading ? "Generating..." : "Generate temporary access"}</Button></div>}
+					</div>
+				</DialogContent>
+			</Dialog>
 			<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
 				<DialogContent className="w-[92%] sm:max-w-md rounded-lg">
 					<div className="space-y-4">
 						<div><h2 className="text-lg font-semibold">Delete {system.name}?</h2><p className="text-sm text-muted-foreground">This removes the agent and its collected data.</p></div>
 						<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button><Button variant="destructive" onClick={deleteSystem}>Delete</Button></div>
+					</div>
+				</DialogContent>
+			</Dialog>
+			<Dialog open={uninstallOpen} onOpenChange={setUninstallOpen}>
+				<DialogContent className="w-[92%] sm:max-w-md rounded-lg">
+					<div className="space-y-4">
+						<div><h2 className="text-lg font-semibold">Uninstall agent from host?</h2><p className="text-sm text-muted-foreground">This stops the Picket systemd service and removes the Picket agent, runner, service file, and environment file from the host. The agent record and collected data remain in Picket until you delete them separately.</p></div>
+						<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setUninstallOpen(false)}>Cancel</Button><Button variant="destructive" onClick={() => void uninstallAgent()}>Uninstall from host</Button></div>
 					</div>
 				</DialogContent>
 			</Dialog>

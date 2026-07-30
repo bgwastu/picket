@@ -19,6 +19,11 @@ RUN update-ca-certificates
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOGC=75 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /picket ./internal/cmd/hub
 RUN CGO_ENABLED=0 GOGC=75 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-w -s" -o /picket-agent ./internal/cmd/agent
+RUN mkdir -p /ssh-connectors && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-w -s" -o /ssh-connectors/picket-connect_linux-amd64 ./internal/cmd/ssh-connect && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-w -s" -o /ssh-connectors/picket-connect_linux-arm64 ./internal/cmd/ssh-connect && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "-w -s" -o /ssh-connectors/picket-connect_darwin-amd64 ./internal/cmd/ssh-connect && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "-w -s" -o /ssh-connectors/picket-connect_darwin-arm64 ./internal/cmd/ssh-connect
 
 # ? -------------------------
 FROM alpine:3.22
@@ -27,11 +32,13 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /picket /
 COPY --from=builder /picket-agent /
+COPY --from=builder /ssh-connectors /ssh-connectors
 
 # Ensure data persistence across container recreations
 VOLUME ["/picket_data"]
 
 ENV PICKET_AGENT_BINARY=/picket-agent
+ENV PICKET_SSH_CONNECTOR_DIR=/ssh-connectors
 
 EXPOSE 8090
 

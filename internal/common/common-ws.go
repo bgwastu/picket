@@ -13,7 +13,32 @@ const (
 	GetContainerLogs
 	// Request container info from agent
 	GetContainerInfo
+	// UninstallAgent removes a Picket systemd installation from the host.
+	UninstallAgent
+	// SSHStream carries a framed bidirectional SSH tunnel.
+	SSHStream
 )
+
+const (
+	SSHStreamOpen uint8 = iota
+	SSHStreamOpenOK
+	SSHStreamOpenError
+	SSHStreamData
+	SSHStreamEOF
+	SSHStreamClose
+)
+
+const SSHStreamMagic uint8 = 0x53
+
+// SSHStreamMessage is used for the raw byte stream. Data is always bounded by
+// the transport implementation and must not be accumulated without a limit.
+type SSHStreamMessage struct {
+	Magic    uint8  `cbor:"4,keyasint"`
+	StreamID uint32 `cbor:"0,keyasint"`
+	Type     uint8  `cbor:"1,keyasint"`
+	Data     []byte `cbor:"2,keyasint,omitempty"`
+	Error    string `cbor:"3,keyasint,omitempty"`
+}
 
 // HubRequest defines the structure for requests sent from hub to agent.
 type HubRequest[T any] struct {
@@ -40,4 +65,9 @@ type ContainerLogsRequest struct {
 
 type ContainerInfoRequest struct {
 	ContainerID string `cbor:"0,keyasint"`
+}
+
+type UninstallAgentResponse struct {
+	Uninstalled bool   `cbor:"0,keyasint"`
+	Message     string `cbor:"1,keyasint,omitempty"`
 }

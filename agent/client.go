@@ -4,11 +4,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/henrygd/beszel/agent/utils"
@@ -34,6 +36,9 @@ type WebSocketClient struct {
 	token              string                              // Authentication token for hub registration
 	hubRequest         *common.HubRequest[cbor.RawMessage] // Reusable request structure for message parsing
 	lastConnectAttempt time.Time                           // Timestamp of last connection attempt
+	sshStreams         map[uint32]net.Conn                 // Active SSH tunnel sockets
+	sshStreamsMu       sync.Mutex
+	writeMu            sync.Mutex
 }
 
 // newWebSocketClient creates a new WebSocket client for the given agent.
@@ -45,6 +50,7 @@ func newWebSocketClient(agent *Agent) (client *WebSocketClient, err error) {
 	}
 
 	client = &WebSocketClient{}
+	client.sshStreams = make(map[uint32]net.Conn)
 
 	client.hubURL, err = url.Parse(hubURLStr)
 	if err != nil {
@@ -154,6 +160,21 @@ func (client *WebSocketClient) OnMessage(conn *gws.Conn, message *gws.Message) {
 		return
 	}
 
+	var streamRequest common.HubRequest[cbor.RawMessage]
+	if err := cbor.Unmarshal(message.Data.Bytes(), &streamRequest); err == nil && streamRequest.Action == common.SSHStream {
+		var stream common.SSHStreamMessage
+		if err := cbor.Unmarshal(streamRequest.Data, &stream); err != nil {
+			return
+		}
+		if stream.Magic != common.SSHStreamMagic {
+			return
+		}
+		if err := client.handleSSHStream(&stream); err != nil {
+			slog.Error("Error handling SSH stream", "err", err)
+		}
+		return
+	}
+
 	var HubRequest common.HubRequest[cbor.RawMessage]
 
 	err := cbor.Unmarshal(message.Data.Bytes(), &HubRequest)
@@ -165,6 +186,89 @@ func (client *WebSocketClient) OnMessage(conn *gws.Conn, message *gws.Message) {
 	if err := client.handleHubRequest(&HubRequest, HubRequest.Id); err != nil {
 		slog.Error("Error handling message", "err", err)
 	}
+}
+
+func (client *WebSocketClient) handleSSHStream(msg *common.SSHStreamMessage) error {
+	switch msg.Type {
+	case common.SSHStreamOpen:
+		client.sshStreamsMu.Lock()
+		if len(client.sshStreams) >= 2 {
+			client.sshStreamsMu.Unlock()
+			return client.sendSSHStream(&common.SSHStreamMessage{StreamID: msg.StreamID, Type: common.SSHStreamOpenError, Error: "SSH session limit reached"})
+		}
+		client.sshStreamsMu.Unlock()
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:22", 5*time.Second)
+		if err != nil {
+			return client.sendSSHStream(&common.SSHStreamMessage{StreamID: msg.StreamID, Type: common.SSHStreamOpenError, Error: "unable to connect to local SSH server"})
+		}
+		client.sshStreamsMu.Lock()
+		client.sshStreams[msg.StreamID] = conn
+		client.sshStreamsMu.Unlock()
+		if err := client.sendSSHStream(&common.SSHStreamMessage{StreamID: msg.StreamID, Type: common.SSHStreamOpenOK}); err != nil {
+			_ = conn.Close()
+			client.sshStreamsMu.Lock()
+			delete(client.sshStreams, msg.StreamID)
+			client.sshStreamsMu.Unlock()
+			return err
+		}
+		go client.readSSHStream(msg.StreamID, conn)
+	case common.SSHStreamData:
+		client.sshStreamsMu.Lock()
+		conn := client.sshStreams[msg.StreamID]
+		client.sshStreamsMu.Unlock()
+		if conn == nil {
+			return nil
+		}
+		_, err := conn.Write(msg.Data)
+		if err != nil {
+		}
+		return err
+	case common.SSHStreamEOF, common.SSHStreamClose:
+		client.sshStreamsMu.Lock()
+		conn := client.sshStreams[msg.StreamID]
+		delete(client.sshStreams, msg.StreamID)
+		client.sshStreamsMu.Unlock()
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}
+	return nil
+}
+
+func (client *WebSocketClient) readSSHStream(streamID uint32, conn net.Conn) {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			data := append([]byte(nil), buf[:n]...)
+			if sendErr := client.sendSSHStream(&common.SSHStreamMessage{StreamID: streamID, Type: common.SSHStreamData, Data: data}); sendErr != nil {
+				break
+			}
+		}
+		if err != nil {
+			_ = client.sendSSHStream(&common.SSHStreamMessage{StreamID: streamID, Type: common.SSHStreamEOF})
+			break
+		}
+	}
+	_ = conn.Close()
+	client.sshStreamsMu.Lock()
+	delete(client.sshStreams, streamID)
+	client.sshStreamsMu.Unlock()
+}
+
+func (client *WebSocketClient) sendSSHStream(msg *common.SSHStreamMessage) error {
+	streamData, err := cbor.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	data, err := cbor.Marshal(common.HubRequest[cbor.RawMessage]{Action: common.SSHStream, Data: streamData})
+	if err != nil {
+		return err
+	}
+	client.writeMu.Lock()
+	err = client.Conn.WriteMessage(gws.OpcodeBinary, data)
+	client.writeMu.Unlock()
+	return err
 }
 
 // OnPing handles WebSocket ping frames.
@@ -180,6 +284,12 @@ func (client *WebSocketClient) Close() {
 	if client.Conn != nil {
 		_ = client.Conn.WriteClose(1000, nil)
 	}
+	client.sshStreamsMu.Lock()
+	for id, conn := range client.sshStreams {
+		_ = conn.Close()
+		delete(client.sshStreams, id)
+	}
+	client.sshStreamsMu.Unlock()
 }
 
 // handleHubRequest routes the request to the appropriate handler using the handler registry.
@@ -200,7 +310,9 @@ func (client *WebSocketClient) sendMessage(data any) error {
 	if err != nil {
 		return err
 	}
+	client.writeMu.Lock()
 	err = client.Conn.WriteMessage(gws.OpcodeBinary, bytes)
+	client.writeMu.Unlock()
 	if err != nil {
 		// If writing fails (e.g., broken pipe due to network issues),
 		// close the connection to trigger reconnection logic (#1263)

@@ -28,14 +28,16 @@ type PendingRequest struct {
 type RequestManager struct {
 	sync.RWMutex
 	conn        *gws.Conn
+	write       func([]byte) error
 	pendingReqs map[RequestID]*PendingRequest
 	nextID      atomic.Uint32
 }
 
 // NewRequestManager creates a new request manager for a WebSocket connection
-func NewRequestManager(conn *gws.Conn) *RequestManager {
+func NewRequestManager(conn *gws.Conn, write func([]byte) error) *RequestManager {
 	rm := &RequestManager{
 		conn:        conn,
+		write:       write,
 		pendingReqs: make(map[RequestID]*PendingRequest),
 	}
 	return rm
@@ -96,6 +98,9 @@ func (rm *RequestManager) sendMessage(data any) error {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	if rm.write != nil {
+		return rm.write(bytes)
+	}
 	return rm.conn.WriteMessage(gws.OpcodeBinary, bytes)
 }
 

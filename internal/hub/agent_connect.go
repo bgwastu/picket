@@ -34,6 +34,7 @@ func (h *Hub) handleAgentConnect(e *core.RequestEvent) error {
 		wsConn.Close([]byte(err.Error()))
 		return err
 	}
+	h.ssh.attachAgent(systemRecord.Id, wsConn)
 	return nil
 }
 
