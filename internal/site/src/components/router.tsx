@@ -1,4 +1,5 @@
 import { createRouter } from "@nanostores/router"
+import type { AnchorHTMLAttributes, MouseEvent } from "react"
 
 const routes = {
 	home: "/",
@@ -11,7 +12,7 @@ const routes = {
  * The base path of the application.
  * This is used to prepend the base path to all routes.
  */
-export const basePath = PICKET?.BASE_PATH || ""
+export const basePath = globalThis.PICKET?.BASE_PATH || ""
 
 /**
  * Prepends the base path to the given path.
@@ -35,20 +36,28 @@ export const navigate = (urlString: string) => {
 	$router.open(urlString)
 }
 
-export function Link(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+type LinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & { href: string }
+
+export function Link(props: LinkProps) {
+	function handleClick(event: MouseEvent<HTMLAnchorElement>) {
+		if (props.onClick) props.onClick(event)
+		if (event.defaultPrevented) return
+		event.preventDefault()
+		const href = props.href || ""
+		if (event.ctrlKey || event.metaKey) {
+			window.open(href, "_blank")
+		} else {
+			navigate(href)
+		}
+	}
+
 	return (
 		<a
 			{...props}
-			onClick={(e) => {
-				e.preventDefault()
-				const href = props.href || ""
-				if (e.ctrlKey || e.metaKey) {
-					window.open(href, "_blank")
-				} else {
-					navigate(href)
-					props.onClick?.(e)
-				}
-			}}
-		></a>
+			href={props.href}
+			onClick={handleClick}
+		>
+			{props.children}
+		</a>
 	)
 }

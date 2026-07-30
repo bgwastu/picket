@@ -65,6 +65,10 @@
 	},
 	"overrides": [
 		{
+			"includes": ["src/index.css"],
+			"linter": { "enabled": false }
+		},
+		{
 			"includes": ["**/*.jsx", "**/*.tsx"],
 			"linter": {
 				"rules": {

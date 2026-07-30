@@ -1,4 +1,4 @@
-import { memo, useState } from "react"
+import { memo } from "react"
 import { Trans } from "@/lib/english"
 import { compareSemVer, parseSemVer } from "@/lib/utils"
 import type { GPUData } from "@/types"
@@ -111,7 +111,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 
 					<LoadAverageChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} />
 
-
 					{hasGpuPowerData && <GpuPowerChart chartData={chartData} grid={grid} dataEmpty={dataEmpty} />}
 				</div>
 
@@ -128,7 +127,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 				<ExtraFsCharts systemData={systemData} />
 
 				{hasContainersTable && <LazyContainersTable systemId={system.id} />}
-
 			</>
 		)
 	}
@@ -229,7 +227,6 @@ export default memo(function SystemDetail({ id }: { id: string }) {
 						)}
 					</TabsContent>
 				)}
-
 			</Tabs>
 		)
 	}

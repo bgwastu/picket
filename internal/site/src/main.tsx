@@ -9,7 +9,6 @@ import Settings from "@/components/routes/settings/layout.tsx"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { Toaster } from "@/components/ui/toaster.tsx"
 import { alertManager } from "@/lib/alerts"
-import { pb } from "@/lib/api.ts"
 import { $copyContent, defaultLayoutWidth } from "@/lib/stores.ts"
 import * as systemsManager from "@/lib/systemsManager.ts"
 import Login from "@/components/login"
@@ -72,17 +71,17 @@ const Layout = () => {
 
 	return (
 		<div style={{ "--container": `${defaultLayoutWidth}px` } as React.CSSProperties}>
-					<div className="container">
-						<Navbar />
-					</div>
-					<div className="container relative">
-						<App />
-						{copyContent && (
-							<Suspense>
-								<CopyToClipboardDialog content={copyContent} />
-							</Suspense>
-						)}
-					</div>
+			<div className="container">
+				<Navbar />
+			</div>
+			<div className="container relative">
+				<App />
+				{copyContent && (
+					<Suspense>
+						<CopyToClipboardDialog content={copyContent} />
+					</Suspense>
+				)}
+			</div>
 		</div>
 	)
 }

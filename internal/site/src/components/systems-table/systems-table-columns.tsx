@@ -3,10 +3,8 @@ import { t, Trans, useLingui } from "@/lib/english"
 import { useStore } from "@nanostores/react"
 import { getPagePath } from "@nanostores/router"
 import type { CellContext, ColumnDef, HeaderContext } from "@tanstack/react-table"
-import type { ClassValue } from "clsx"
 import {
 	ArrowUpDownIcon,
-	ChevronRightSquareIcon,
 	ClockArrowUp,
 	CopyIcon,
 	CpuIcon,
@@ -16,22 +14,14 @@ import {
 	PauseCircleIcon,
 	PenBoxIcon,
 	PlayCircleIcon,
-	ServerIcon,
 	Trash2Icon,
 } from "lucide-react"
 import { memo, useMemo, useRef, useState } from "react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip"
 import { pb } from "@/lib/api"
-import { ConnectionType, connectionTypeLabels, MeterState, SystemStatus } from "@/lib/enums"
+import { MeterState, SystemStatus } from "@/lib/enums"
 import { $displaySettings, $longestSystemNameLen } from "@/lib/stores"
-import {
-	cn,
-	copyToClipboard,
-	decimalString,
-	formatBytes,
-	parseSemVer,
-	secondsToUptimeString,
-} from "@/lib/utils"
+import { cn, copyToClipboard, decimalString, formatBytes, parseSemVer, secondsToUptimeString } from "@/lib/utils"
 import type { SystemRecord } from "@/types"
 import { SystemDialog } from "../add-system"
 import AlertButton from "../alerts/alert-button"
@@ -55,12 +45,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
-import {
-	EthernetIcon,
-	GpuIcon,
-	HourglassIcon,
-	WebSocketIcon,
-} from "../ui/icons"
+import { EthernetIcon, GpuIcon, HourglassIcon } from "../ui/icons"
 
 const STATUS_COLORS = {
 	[SystemStatus.Up]: "bg-green-500",
@@ -77,7 +62,7 @@ function getMeterStateByThresholds(value: number, warn = 65, crit = 90): MeterSt
  * @param viewMode - "table" or "grid"
  * @returns - Column definitions for the systems table
  */
-export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<SystemRecord>[] {
+export function SystemsTableColumns(_viewMode: "table" | "grid"): ColumnDef<SystemRecord>[] {
 	return [
 		{
 			// size: 200,
@@ -121,7 +106,7 @@ export function SystemsTableColumns(viewMode: "table" | "grid"): ColumnDef<Syste
 			})(),
 			enableHiding: false,
 			invertSorting: false,
-			Icon: ServerIcon,
+			Icon: MoreHorizontalIcon,
 			cell: (info) => {
 				const { name, id } = info.row.original
 				const longestName = useStore($longestSystemNameLen)
@@ -443,13 +428,13 @@ export const ActionsButton = memo(({ system }: { system: SystemRecord }) => {
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
 						<DropdownMenuItem
-								onSelect={() => {
-									editOpened.current = true
-									setEditOpen(true)
-								}}
-							>
-								<PenBoxIcon className="me-2.5 size-4" />
-								<Trans>Edit</Trans>
+							onSelect={() => {
+								editOpened.current = true
+								setEditOpen(true)
+							}}
+						>
+							<PenBoxIcon className="me-2.5 size-4" />
+							<Trans>Edit</Trans>
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							onClick={() => {

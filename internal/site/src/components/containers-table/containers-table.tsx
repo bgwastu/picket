@@ -374,7 +374,7 @@ function ContainerSheet({
 						<div className="flex items-center justify-between border-y px-5 py-3">
 							<div><h3 className="font-medium">{t`Logs`}</h3><p className="text-xs text-muted-foreground">Live output from {container.name}</p></div>
 							<div className="flex items-center gap-1">
-							<Button variant="ghost" size="icon" aria-label={logsCopied ? t`Copied` : t`Copy logs`} onClick={() => { void copyToClipboard(logsDisplay); setLogsCopied(true); setTimeout(() => setLogsCopied(false), 1500) }} disabled={!logsDisplay}>{logsCopied ? <CheckIcon className="size-4 text-green-500" /> : <CopyIcon className="size-4" />}</Button>
+									<Button variant="ghost" size="icon" aria-label={logsCopied ? t`Copied` : t`Copy logs`} onClick={async () => { await copyToClipboard(logsDisplay); setLogsCopied(true); setTimeout(() => setLogsCopied(false), 1500) }} disabled={!logsDisplay}>{logsCopied ? <CheckIcon className="size-4 text-green-500" /> : <CopyIcon className="size-4" />}</Button>
 							<Button
 								variant="ghost"
 								size="sm"
