@@ -78,6 +78,7 @@ func (h *Hub) registerApiRoutes(se *core.ServeEvent) error {
 	api.POST("/auth", h.authenticateDashboard)
 	api.POST("/systems", h.createSystem)
 	api.GET("/systems/{id}/install-script", h.getAgentInstallScript)
+	api.GET("/systems/{id}/install-command", h.getAgentInstallCommand)
 	api.GET("/agent-install/{token}", h.getAgentInstallByToken)
 	api.POST("/systems/{id}/ssh-launch", h.createSSHLaunch)
 	api.POST("/systems/{id}/uninstall-agent", h.uninstallAgent)
@@ -153,6 +154,20 @@ func (h *Hub) getAgentInstallScript(e *core.RequestEvent) error {
 	return h.agentInstallScript(e, record)
 }
 
+func (h *Hub) getAgentInstallCommand(e *core.RequestEvent) error {
+	record, err := e.App.FindRecordById("systems", e.Request.PathValue("id"))
+	if err != nil {
+		return e.NotFoundError("System not found", err)
+	}
+	hubURL := strings.TrimSuffix(h.appURL, "/")
+	if hubURL == "" {
+		hubURL = requestBaseURL(e)
+	}
+	command := fmt.Sprintf("curl -fsSL %q | sudo sh", hubURL+"/api/picket/agent-install/"+record.GetString("token"))
+	e.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	return e.String(http.StatusOK, command)
+}
+
 func (h *Hub) getAgentInstallByToken(e *core.RequestEvent) error {
 	record, err := e.App.FindFirstRecordByFilter("systems", "token = {:token}", dbx.Params{"token": e.Request.PathValue("token")})
 	if err != nil {
@@ -182,15 +197,26 @@ esac
 AGENT_BIN=${AGENT_BIN:-/usr/local/bin/picket-agent}
 RUNNER=/usr/local/libexec/picket-agent-runner
 SERVICE_FILE=/etc/systemd/system/picket-agent.service
+tmp="$AGENT_BIN.tmp"
+cleanup() { rm -f "$tmp"; }
+trap cleanup EXIT INT TERM
 mkdir -p /etc/picket /usr/local/libexec
 cat > /etc/picket/agent.env <<EOF
 HUB_URL=$HUB_URL
 TOKEN=$TOKEN
 EOF
-if ! command -v curl >/dev/null 2>&1; then echo "curl is required" >&2; exit 1; fi
-curl -fsSL "$HUB_URL/api/picket/agent-binary?token=$TOKEN&os=$asset" -o "$AGENT_BIN.tmp"
-chmod 0755 "$AGENT_BIN.tmp"
-mv "$AGENT_BIN.tmp" "$AGENT_BIN"
+if ! command -v curl >/dev/null 2>&1; then echo "ERROR: curl is required" >&2; exit 1; fi
+echo "Downloading Picket agent ($asset) from $HUB_URL..." >&2
+if ! curl -fsSL "$HUB_URL/api/picket/agent-binary?token=$TOKEN&os=$asset" -o "$tmp"; then
+  echo "ERROR: unable to download the Picket agent binary for $asset from $HUB_URL" >&2
+  exit 1
+fi
+if [ ! -s "$tmp" ]; then
+  echo "ERROR: hub returned an empty Picket agent binary for $asset" >&2
+  exit 1
+fi
+chmod 0755 "$tmp"
+mv "$tmp" "$AGENT_BIN"
 cat > "$RUNNER" <<'EOF'
 #!/bin/sh
 set -eu
@@ -206,7 +232,20 @@ case "$os/$arch" in
 esac
 URL="$HUB_URL/api/picket/agent-binary?token=$TOKEN&os=$asset"
 while :; do
-  curl -fsSL "$URL" -o "$BIN.next" && chmod 0755 "$BIN.next" && mv "$BIN.next" "$BIN"
+  if ! curl -fsSL "$URL" -o "$BIN.next"; then
+    echo "ERROR: unable to update Picket agent binary ($asset); retrying in 30 seconds" >&2
+    sleep 30
+    continue
+  fi
+  if [ ! -s "$BIN.next" ]; then
+    echo "ERROR: hub returned an empty Picket agent binary ($asset); retrying in 30 seconds" >&2
+    rm -f "$BIN.next"
+    sleep 30
+    continue
+  fi
+  chmod 0755 "$BIN.next"
+  mv "$BIN.next" "$BIN"
+  echo "Starting Picket agent ($asset)..." >&2
   "$BIN" &
   child=$!
   sleep 21600 &
@@ -216,7 +255,7 @@ while :; do
     sleep 5
   done
   kill "$timer" 2>/dev/null || true
-  wait "$child" 2>/dev/null || true
+  wait "$child" || echo "ERROR: Picket agent exited with status $?; restarting" >&2
 done
 EOF
 chmod 0755 "$RUNNER"

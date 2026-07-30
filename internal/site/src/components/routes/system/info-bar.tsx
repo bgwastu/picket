@@ -56,7 +56,7 @@ export default function InfoBar({
 }) {
 	const { t } = useLingui()
 	const [editOpen, setEditOpen] = useState(false)
-	const [installScript, setInstallScript] = useState("")
+	const [installCommand, setInstallCommand] = useState("")
 	const [installOpen, setInstallOpen] = useState(false)
 	const [deleteOpen, setDeleteOpen] = useState(false)
 	const [uninstallWithDelete, setUninstallWithDelete] = useState(false)
@@ -97,10 +97,9 @@ export default function InfoBar({
 	}
 
 	async function loadInstallScript() {
-		const response = await fetch(`/api/picket/systems/${system.id}/install-script`, { credentials: "same-origin" })
+		const response = await fetch(`/api/picket/systems/${system.id}/install-command`, { credentials: "same-origin" })
 		if (!response.ok) throw new Error("Unable to load install script")
-		const script = await response.text()
-		setInstallScript(script)
+		setInstallCommand(await response.text())
 		setInstallOpen(true)
 	}
 
@@ -335,9 +334,10 @@ export default function InfoBar({
 			<Dialog open={installOpen} onOpenChange={setInstallOpen}>
 				<DialogContent className="w-[92%] sm:max-w-2xl rounded-lg">
 					<div className="space-y-4">
-						<div><h2 className="text-lg font-semibold">Install this agent</h2><p className="text-sm text-muted-foreground">Run this script as root or with sudo on the Linux host.</p></div>
-						<textarea className="min-h-72 w-full rounded-md border bg-muted p-3 font-mono text-xs" readOnly value={installScript} aria-label="Agent install script" />
-						<div className="flex justify-end gap-2"><InputCopy value={installScript} /><Button variant="outline" onClick={() => setInstallOpen(false)}>Close</Button></div>
+						<div><h2 className="text-lg font-semibold">Install this agent</h2><p className="text-sm text-muted-foreground">Run this one-line command as a user with sudo access on the Linux host.</p></div>
+						<div className="grid gap-2"><p className="text-sm font-medium">Terminal command</p><InputCopy value={installCommand} /></div>
+						<p className="text-sm text-muted-foreground">The command downloads the correct agent binary for the host architecture, installs the systemd service, and starts the agent.</p>
+						<div className="flex justify-end"><Button variant="outline" onClick={() => setInstallOpen(false)}>Close</Button></div>
 					</div>
 				</DialogContent>
 			</Dialog>
