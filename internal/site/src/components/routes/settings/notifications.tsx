@@ -37,7 +37,7 @@ export default function Notifications() {
 	async function save() {
 		setLoading(true)
 		try {
-			const parsed = v.parse(schema, settings)
+			const parsed = v.parse(schema, { ...settings, telegramUserIds: settings.telegramUserIds.map((id) => id.trim()).filter(Boolean) })
 			setSettings(await pb.send<NotificationSettings>(endpoint, { method: "PUT", body: parsed }))
 			toast({ title: "Telegram notification settings saved" })
 		} catch (error) {

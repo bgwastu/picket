@@ -130,6 +130,7 @@ func (am *AlertManager) SendAlert(data AlertMessageData) error {
 	if err := record.UnmarshalJSONField("settings", &notificationSettings); err != nil {
 		am.hub.Logger().Error("Failed to unmarshal user settings", "err", err)
 	}
+	notificationSettings.TelegramUserIDs = nonEmptyTelegramUserIDs(notificationSettings.TelegramUserIDs)
 	if notificationSettings.TelegramBotToken == "" || len(notificationSettings.TelegramUserIDs) == 0 {
 		return nil
 	}

@@ -304,11 +304,18 @@ func requestBaseURL(e *core.RequestEvent) string {
 	if comma := strings.IndexByte(scheme, ','); comma >= 0 {
 		scheme = scheme[:comma]
 	}
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	switch scheme {
+	case "wss":
+		scheme = "https"
+	case "ws":
+		scheme = "http"
+	}
 	host := e.Request.Header.Get("X-Forwarded-Host")
 	if host == "" {
 		host = e.Request.Host
 	}
-	return strings.TrimSuffix(strings.TrimSpace(scheme), "://") + "://" + host
+	return strings.TrimSuffix(scheme, "://") + "://" + host
 }
 
 func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {
