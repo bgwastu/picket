@@ -299,7 +299,7 @@ func (h *Hub) getSSHLauncher(e *core.RequestEvent) error {
 	}
 	hubURL := strings.TrimSuffix(h.appURL, "/")
 	if hubURL == "" {
-		hubURL = "http://127.0.0.1:8090"
+		hubURL = requestBaseURL(e)
 	}
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
