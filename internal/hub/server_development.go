@@ -60,6 +60,6 @@ func (h *Hub) startServer(se *core.ServeEvent) error {
 		proxy.ServeHTTP(e.Response, e.Request)
 		return nil
 	})
-	_ = osutils.LaunchURL(h.appURL)
+	_ = osutils.LaunchURL(h.getAppURL())
 	return nil
 }

@@ -126,8 +126,8 @@ func (am *AlertManager) SendTestNotification(e *core.RequestEvent) error {
 		return e.BadRequestError("Telegram bot token and allowed user IDs are required", err)
 	}
 	for _, userID := range settings.TelegramUserIDs {
-		if err = am.SendTelegramAlert(settings.TelegramBotToken, userID, "Test Alert", "This is a notification from Picket.", am.hub.Settings().Meta.AppURL); err != nil {
-			return e.InternalServerError("Telegram test failed", err)
+		if err = am.SendTelegramAlert(settings.TelegramBotToken, userID, "Test Alert", "This is a notification from Picket.", am.hub.MakeLink()); err != nil {
+			return e.InternalServerError("Telegram test failed: "+err.Error(), err)
 		}
 	}
 	return e.JSON(http.StatusOK, map[string]bool{"sent": true})

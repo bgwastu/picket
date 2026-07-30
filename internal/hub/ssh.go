@@ -297,7 +297,7 @@ func (h *Hub) getSSHLauncher(e *core.RequestEvent) error {
 	if !ok || time.Now().After(launch.Expires) {
 		return e.UnauthorizedError("Invalid or expired SSH launch", nil)
 	}
-	hubURL := strings.TrimSuffix(h.appURL, "/")
+	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
 	if hubURL == "" {
 		hubURL = requestBaseURL(e)
 	}

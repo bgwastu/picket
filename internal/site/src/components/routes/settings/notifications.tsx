@@ -69,5 +69,8 @@ export default function Notifications() {
 
 async function test() {
 	try { await pb.send("/api/picket/test-notification", { method: "POST" }); toast({ title: "Telegram test sent" }) }
-	catch (error) { toast({ title: "Telegram test failed", description: (error as ClientResponseError).data?.message, variant: "destructive" }) }
+	catch (error) {
+		const responseError = error as ClientResponseError
+		toast({ title: "Telegram test failed", description: responseError.data?.message ?? responseError.message, variant: "destructive" })
+	}
 }

@@ -25,6 +25,12 @@ var containerIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
 func (h *Hub) registerMiddlewares(se *core.ServeEvent) {
 	se.Router.BindFunc(func(e *core.RequestEvent) error {
 		path := e.Request.URL.Path
+		if h.getAppURL() == "" {
+			h.setAppURL(requestBaseURL(e))
+			settings := h.Settings()
+			settings.Meta.AppURL = h.getAppURL()
+			_ = h.Save(settings)
+		}
 		if h.dashboardPasswordHash != "" && !h.isPublicRequest(e) && !hasDashboardSession(e.Request.Header.Get("Cookie"), h.dashboardPasswordHash) {
 			return e.UnauthorizedError("Dashboard password required", nil)
 		}
@@ -159,7 +165,7 @@ func (h *Hub) getAgentInstallCommand(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("System not found", err)
 	}
-	hubURL := strings.TrimSuffix(h.appURL, "/")
+	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
 	if hubURL == "" {
 		hubURL = requestBaseURL(e)
 	}
@@ -177,7 +183,7 @@ func (h *Hub) getAgentInstallByToken(e *core.RequestEvent) error {
 }
 
 func (h *Hub) agentInstallScript(e *core.RequestEvent, record *core.Record) error {
-	hubURL := strings.TrimSuffix(h.appURL, "/")
+	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
 	if hubURL == "" {
 		hubURL = requestBaseURL(e)
 	}

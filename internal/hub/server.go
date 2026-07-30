@@ -29,11 +29,11 @@ func modifyIndexHTML(hub *Hub, html []byte) string {
 }
 
 func getPublicAppInfo(hub *Hub) PublicAppInfo {
-	parsedURL, _ := url.Parse(hub.appURL)
+	parsedURL, _ := url.Parse(hub.getAppURL())
 	info := PublicAppInfo{
 		BASE_PATH:   strings.TrimSuffix(parsedURL.Path, "/") + "/",
 		HUB_VERSION: beszel.Version,
-		HUB_URL:     hub.appURL,
+		HUB_URL:     hub.getAppURL(),
 	}
 	if val, _ := utils.GetEnv("OAUTH_DISABLE_POPUP"); val == "true" {
 		info.OAUTH_DISABLE_POPUP = true

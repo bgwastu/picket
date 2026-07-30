@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/henrygd/beszel/internal/alerts"
 	"github.com/henrygd/beszel/internal/hub/systems"
@@ -26,6 +27,7 @@ type Hub struct {
 	*alerts.AlertManager
 	rm                    *records.RecordManager
 	sm                    *systems.SystemManager
+	appURLMu              sync.RWMutex
 	appURL                string
 	dashboardPasswordHash string
 	ssh                   *sshManager
@@ -100,7 +102,7 @@ func (h *Hub) initialize(app core.App) error {
 	settings.Batch.Enabled = true
 	// set URL if APP_URL env is set
 	if appURL, isSet := utils.GetEnv("APP_URL"); isSet {
-		h.appURL = appURL
+		h.setAppURL(appURL)
 		settings.Meta.AppURL = appURL
 	}
 	passwordFile := filepath.Join(app.DataDir(), ".hub-password-hash")
@@ -116,6 +118,18 @@ func (h *Hub) initialize(app core.App) error {
 		return err
 	}
 	return setCollectionAccessSettings(app)
+}
+
+func (h *Hub) getAppURL() string {
+	h.appURLMu.RLock()
+	defer h.appURLMu.RUnlock()
+	return h.appURL
+}
+
+func (h *Hub) setAppURL(appURL string) {
+	h.appURLMu.Lock()
+	h.appURL = strings.TrimSuffix(appURL, "/")
+	h.appURLMu.Unlock()
 }
 
 func hashDashboardPassword(password string) string {
@@ -135,7 +149,10 @@ func (h *Hub) registerCronJobs(_ *core.ServeEvent) error {
 // MakeLink formats a link with the app URL and path segments.
 // Only path segments should be provided.
 func (h *Hub) MakeLink(parts ...string) string {
-	base := strings.TrimSuffix(h.Settings().Meta.AppURL, "/")
+	base := strings.TrimSuffix(h.getAppURL(), "/")
+	if base == "" {
+		base = strings.TrimSuffix(h.Settings().Meta.AppURL, "/")
+	}
 	for _, part := range parts {
 		if part == "" {
 			continue
