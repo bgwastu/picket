@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/user"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -297,10 +296,7 @@ func (h *Hub) getSSHLauncher(e *core.RequestEvent) error {
 	if !ok || time.Now().After(launch.Expires) {
 		return e.UnauthorizedError("Invalid or expired SSH launch", nil)
 	}
-	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
-	if hubURL == "" {
-		hubURL = requestBaseURL(e)
-	}
+	hubURL := h.appURLForRequest(e)
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
 tmp="$(mktemp -d)"

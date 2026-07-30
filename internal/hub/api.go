@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -25,7 +27,7 @@ var containerIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
 func (h *Hub) registerMiddlewares(se *core.ServeEvent) {
 	se.Router.BindFunc(func(e *core.RequestEvent) error {
 		path := e.Request.URL.Path
-		if h.getAppURL() == "" {
+		if isLocalURL(h.getAppURL()) {
 			h.setAppURL(requestBaseURL(e))
 			settings := h.Settings()
 			settings.Meta.AppURL = h.getAppURL()
@@ -165,10 +167,7 @@ func (h *Hub) getAgentInstallCommand(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("System not found", err)
 	}
-	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
-	if hubURL == "" {
-		hubURL = requestBaseURL(e)
-	}
+	hubURL := h.appURLForRequest(e)
 	command := fmt.Sprintf("curl -fsSL %q | sudo sh", hubURL+"/api/picket/agent-install/"+record.GetString("token"))
 	e.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	return e.String(http.StatusOK, command)
@@ -183,10 +182,7 @@ func (h *Hub) getAgentInstallByToken(e *core.RequestEvent) error {
 }
 
 func (h *Hub) agentInstallScript(e *core.RequestEvent, record *core.Record) error {
-	hubURL := strings.TrimSuffix(h.getAppURL(), "/")
-	if hubURL == "" {
-		hubURL = requestBaseURL(e)
-	}
+	hubURL := h.appURLForRequest(e)
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
 [ "$(id -u)" -eq 0 ] || { echo "Run this installer as root or with sudo." >&2; exit 1; }
@@ -316,6 +312,28 @@ func requestBaseURL(e *core.RequestEvent) string {
 		host = e.Request.Host
 	}
 	return strings.TrimSuffix(scheme, "://") + "://" + host
+}
+
+func (h *Hub) appURLForRequest(e *core.RequestEvent) string {
+	if appURL := strings.TrimSuffix(h.getAppURL(), "/"); appURL != "" && !isLocalURL(appURL) {
+		return appURL
+	}
+	return requestBaseURL(e)
+}
+
+func isLocalURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {
