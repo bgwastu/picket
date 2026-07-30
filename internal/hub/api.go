@@ -40,7 +40,7 @@ func (h *Hub) isPublicRequest(e *core.RequestEvent) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return true
 	}
-	return path == "/api/health" || path == "/api/picket/auth" || path == "/api/picket/agent-connect" || path == "/api/picket/agent-binary" || path == "/api/picket/ssh-connect" || strings.HasPrefix(path, "/api/picket/ssh-launch/") || path == "/api/picket/ssh-connector"
+	return path == "/api/health" || path == "/api/picket/auth" || path == "/api/picket/agent-connect" || path == "/api/picket/agent-binary" || path == "/api/picket/ssh-connect" || strings.HasPrefix(path, "/api/picket/ssh-launch/") || path == "/api/picket/ssh-connector" || strings.HasPrefix(path, "/api/picket/agent-install/")
 }
 
 func hasDashboardSession(cookieHeader, passwordHash string) bool {
@@ -78,6 +78,7 @@ func (h *Hub) registerApiRoutes(se *core.ServeEvent) error {
 	api.POST("/auth", h.authenticateDashboard)
 	api.POST("/systems", h.createSystem)
 	api.GET("/systems/{id}/install-script", h.getAgentInstallScript)
+	api.GET("/agent-install/{token}", h.getAgentInstallByToken)
 	api.POST("/systems/{id}/ssh-launch", h.createSSHLaunch)
 	api.POST("/systems/{id}/uninstall-agent", h.uninstallAgent)
 	api.GET("/ssh-connect", h.handleSSHConnect)
@@ -149,9 +150,21 @@ func (h *Hub) getAgentInstallScript(e *core.RequestEvent) error {
 	if err != nil {
 		return e.NotFoundError("System not found", err)
 	}
+	return h.agentInstallScript(e, record)
+}
+
+func (h *Hub) getAgentInstallByToken(e *core.RequestEvent) error {
+	record, err := e.App.FindFirstRecordByFilter("systems", "token = {:token}", dbx.Params{"token": e.Request.PathValue("token")})
+	if err != nil {
+		return e.UnauthorizedError("Invalid agent token", nil)
+	}
+	return h.agentInstallScript(e, record)
+}
+
+func (h *Hub) agentInstallScript(e *core.RequestEvent, record *core.Record) error {
 	hubURL := strings.TrimSuffix(h.appURL, "/")
 	if hubURL == "" {
-		hubURL = "http://127.0.0.1:8090"
+		hubURL = requestBaseURL(e)
 	}
 	script := fmt.Sprintf(`#!/bin/sh
 set -eu
@@ -211,6 +224,24 @@ echo "Picket agent installed and started."
 `, hubURL, record.GetString("token"))
 	e.Response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	return e.String(http.StatusOK, script)
+}
+
+func requestBaseURL(e *core.RequestEvent) string {
+	scheme := e.Request.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "http"
+		if e.Request.TLS != nil {
+			scheme = "https"
+		}
+	}
+	if comma := strings.IndexByte(scheme, ','); comma >= 0 {
+		scheme = scheme[:comma]
+	}
+	host := e.Request.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = e.Request.Host
+	}
+	return strings.TrimSuffix(strings.TrimSpace(scheme), "://") + "://" + host
 }
 
 func (h *Hub) serveAgentBinary(e *core.RequestEvent) error {

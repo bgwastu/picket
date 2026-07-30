@@ -19,9 +19,10 @@ export function SystemDialog({ setOpen, system }: { setOpen: (open: boolean) => 
 	const [name, setName] = useState(system?.name ?? "")
 	const [token, setToken] = useState("")
 	const [installScript, setInstallScript] = useState("")
+	const [installCommand, setInstallCommand] = useState("")
 	const [loading, setLoading] = useState(false)
 
-	useEffect(() => { setName(system?.name ?? ""); setToken(""); setInstallScript("") }, [system])
+	useEffect(() => { setName(system?.name ?? ""); setToken(""); setInstallScript(""); setInstallCommand("") }, [system])
 
 	async function submit(event: React.FormEvent) {
 		event.preventDefault()
@@ -37,6 +38,7 @@ export function SystemDialog({ setOpen, system }: { setOpen: (open: boolean) => 
 			const installResponse = await fetch(`/api/picket/systems/${enrollment.system.id}/install-script`, { credentials: "same-origin" })
 			if (!installResponse.ok) throw new Error("Unable to load install script")
 			setInstallScript(await installResponse.text())
+			setInstallCommand(`curl -fsSL '${window.location.origin}/api/picket/agent-install/${enrollment.token}' | sudo sh`)
 		} catch (error) {
 			console.error(error)
 			toast({ title: "Unable to create system", description: "The hub did not return an agent enrollment token.", variant: "destructive" })
@@ -53,8 +55,9 @@ export function SystemDialog({ setOpen, system }: { setOpen: (open: boolean) => 
 			</DialogHeader>
 			{token ? (
 				<div className="space-y-4">
-					<div className="grid gap-2"><Label>Linux installer</Label><InputCopy value={installScript} /></div>
-					<p className="text-sm text-muted-foreground">Run this script as root or with sudo. It installs a native systemd daemon, connects it with the generated token, and keeps Docker monitoring available through the host socket.</p>
+					<div className="grid gap-2"><Label>One-line Linux installer</Label><InputCopy value={installCommand} /></div>
+					<div className="grid gap-2"><Label>Installer script</Label><textarea className="min-h-48 w-full rounded-md border bg-muted p-3 font-mono text-xs" readOnly value={installScript} aria-label="Agent install script" /></div>
+					<p className="text-sm text-muted-foreground">Run the one-line command on the Linux host. It downloads the installer from this hub, installs a native systemd daemon, and starts the agent with the generated token.</p>
 					<DialogFooter><Button onClick={() => setOpen(false)}>Close</Button></DialogFooter>
 				</div>
 			) : (
